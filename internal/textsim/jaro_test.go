@@ -8,10 +8,10 @@ import (
 func TestJaro(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		a, b     string
-		want     float64
-		epsilon  float64
+		name    string
+		a, b    string
+		want    float64
+		epsilon float64
 	}{
 		{"both empty", "", "", 1.0, 0.0001},
 		{"one empty", "abc", "", 0.0, 0.0001},

@@ -7,6 +7,7 @@ import "time"
 // the platforms the library is tested against.
 type Platform string
 
+// Built-in Platform identifiers. Callers may also define their own.
 const (
 	PlatformSpotify    Platform = "spotify"
 	PlatformAppleMusic Platform = "apple_music"
@@ -20,6 +21,8 @@ const (
 // ReleaseType categorises a release.
 type ReleaseType uint8
 
+// Known release-type categories. ReleaseTypeUnknown is the zero value and
+// means the caller did not supply this information.
 const (
 	ReleaseTypeUnknown ReleaseType = iota
 	ReleaseTypeAlbum
@@ -48,6 +51,7 @@ func (r ReleaseType) String() string {
 // explicit content.
 type Explicitness uint8
 
+// Explicitness values. ExplicitnessUnknown is the zero value.
 const (
 	ExplicitnessUnknown Explicitness = iota
 	ExplicitnessClean

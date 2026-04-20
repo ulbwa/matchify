@@ -13,6 +13,7 @@ import "regexp"
 // Marker is the canonical identifier of a recording variant.
 type Marker string
 
+// Known recording-variant markers.
 const (
 	MarkerLive         Marker = "live"
 	MarkerAcoustic     Marker = "acoustic"

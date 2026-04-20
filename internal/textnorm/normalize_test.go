@@ -54,9 +54,9 @@ func TestCollapseWhitespace(t *testing.T) {
 func TestNormalize(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		in      string
-		want    string
+		name string
+		in   string
+		want string
 	}{
 		{"identical", "Hello World", "hello world"},
 		{"accents", "Björk", "bjork"},

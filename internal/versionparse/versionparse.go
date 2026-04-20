@@ -12,6 +12,7 @@ import "regexp"
 // Marker is a canonical identifier for a family of edition labels.
 type Marker string
 
+// Known edition markers.
 const (
 	MarkerDeluxe        Marker = "deluxe"
 	MarkerSuperDeluxe   Marker = "super_deluxe"

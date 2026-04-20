@@ -43,8 +43,8 @@ func TestArtistMatcher_NameSimilarity(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
-		name     string
-		a, b     Artist
+		name        string
+		a, b        Artist
 		shouldMatch bool
 	}{
 		{"identical", Artist{Name: "The Beatles"}, Artist{Name: "The Beatles"}, true},

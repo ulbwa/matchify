@@ -8,8 +8,8 @@ import (
 func TestExtractFeatures(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		in      string
+		name      string
+		in        string
 		wantTitle string
 		wantFeats []string
 	}{
