@@ -1,0 +1,26 @@
+# Binaries
+*.test
+*.out
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Coverage
+coverage.out
+coverage.html
+cover.*
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Go workspace
+go.work
+go.work.sum
+
+# Fuzz corpus
+testdata/fuzz/
