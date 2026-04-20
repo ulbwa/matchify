@@ -31,6 +31,10 @@ func TestMarkers(t *testing.T) {
 		{"spotify session", "Song - Spotify Session", []Marker{MarkerSession}},
 		{"taylor's version", "Love Story (Taylor's Version)", []Marker{MarkerRerecording}},
 		{"rerecording", "Song (Re-Recorded)", []Marker{MarkerRerecording}},
+		{"stripped", "Dirt Femme (Stripped)", []Marker{MarkerStripped}},
+		{"stripped version", "Song (Stripped Version)", []Marker{MarkerStripped}},
+		{"stripped down", "Song (Stripped Down)", []Marker{MarkerStripped}},
+		{"extended cut", "Dirt Femme (Extended Cut)", []Marker{MarkerExtendedCut}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -112,21 +112,6 @@ func TestTrackMatcher_CrossPlatformSameTrack(t *testing.T) {
 			},
 		},
 		{
-			name: "explicit vs clean",
-			a: Track{
-				Name:     "HUMBLE.",
-				Artists:  []Artist{{Name: "Kendrick Lamar"}},
-				Explicit: ExplicitnessExplicit,
-				Duration: 177 * time.Second,
-			},
-			b: Track{
-				Name:     "HUMBLE. (Clean)",
-				Artists:  []Artist{{Name: "Kendrick Lamar"}},
-				Explicit: ExplicitnessClean,
-				Duration: 177 * time.Second,
-			},
-		},
-		{
 			name: "accented artist",
 			a: Track{
 				Name:     "Partition",
@@ -137,6 +122,34 @@ func TestTrackMatcher_CrossPlatformSameTrack(t *testing.T) {
 				Name:     "Partition",
 				Artists:  []Artist{{Name: "Beyonce"}},
 				Duration: 317 * time.Second,
+			},
+		},
+		{
+			name: "both explicit agree",
+			a: Track{
+				Name:     "HUMBLE.",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Explicit: ExplicitnessExplicit,
+				Duration: 177 * time.Second,
+			},
+			b: Track{
+				Name:     "HUMBLE. (Explicit)",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Duration: 177 * time.Second,
+			},
+		},
+		{
+			name: "both clean agree",
+			a: Track{
+				Name:     "HUMBLE. (Clean)",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Duration: 177 * time.Second,
+			},
+			b: Track{
+				Name:     "HUMBLE. (Clean Version)",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Explicit: ExplicitnessClean,
+				Duration: 177 * time.Second,
 			},
 		},
 		{
@@ -298,6 +311,48 @@ func TestTrackMatcher_ShouldNotMatch(t *testing.T) {
 				Name:     "Intro",
 				Artists:  []Artist{{Name: "Artist"}},
 				Duration: 360 * time.Second,
+			},
+		},
+		{
+			name: "explicit flag mismatch",
+			a: Track{
+				Name:     "HUMBLE.",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Explicit: ExplicitnessExplicit,
+				Duration: 177 * time.Second,
+			},
+			b: Track{
+				Name:     "HUMBLE.",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Explicit: ExplicitnessClean,
+				Duration: 177 * time.Second,
+			},
+		},
+		{
+			name: "explicit field vs clean label",
+			a: Track{
+				Name:     "HUMBLE.",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Explicit: ExplicitnessExplicit,
+				Duration: 177 * time.Second,
+			},
+			b: Track{
+				Name:     "HUMBLE. (Clean)",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Duration: 177 * time.Second,
+			},
+		},
+		{
+			name: "explicit paren vs clean paren",
+			a: Track{
+				Name:     "HUMBLE. (Explicit)",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Duration: 177 * time.Second,
+			},
+			b: Track{
+				Name:     "HUMBLE. (Clean)",
+				Artists:  []Artist{{Name: "Kendrick Lamar"}},
+				Duration: 177 * time.Second,
 			},
 		},
 	}

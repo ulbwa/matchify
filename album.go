@@ -3,6 +3,8 @@ package matchify
 import (
 	"context"
 
+	"github.com/ulbwa/matchify/internal/explicitparse"
+	"github.com/ulbwa/matchify/internal/recordingparse"
 	"github.com/ulbwa/matchify/internal/versionparse"
 )
 
@@ -40,6 +42,18 @@ type AlbumMatcherOptions struct {
 	// UPCMismatchCap caps the score when both sides declare a UPC and
 	// the codes differ. Defaults to 0.4; set to 1 to disable.
 	UPCMismatchCap float64
+
+	// VariantMismatchCap caps the score when the album names contain
+	// different sets of recording-variant markers (e.g. plain vs
+	// Stripped, Extended Cut vs Stripped). Defaults to 0.5. These are
+	// distinct versions of the release and must not collapse into one.
+	VariantMismatchCap float64
+
+	// ExplicitMismatchCap caps the score when the two albums disagree
+	// on their explicit/clean status (either inferred from the name —
+	// "(Clean Version)", "(Explicit)" — or provided elsewhere). Clean
+	// and explicit masters are distinct products. Defaults to 0.3.
+	ExplicitMismatchCap float64
 }
 
 // AlbumMatcher scores the similarity of two Album values.
@@ -56,6 +70,8 @@ func NewAlbumMatcher(opts AlbumMatcherOptions) *AlbumMatcher {
 	applyDefault(&opts.TypeWeight, 0.3)
 	applyDefault(&opts.EditionPenalty, 0.1)
 	applyDefault(&opts.UPCMismatchCap, 0.4)
+	applyDefault(&opts.VariantMismatchCap, 0.5)
+	applyDefault(&opts.ExplicitMismatchCap, 0.3)
 	return &AlbumMatcher{opts: opts}
 }
 
@@ -117,6 +133,24 @@ func (m *AlbumMatcher) Match(ctx context.Context, a, b Album) Score {
 				Weight: 0,
 				Note:   editionNote(markersA, markersB),
 			})
+		}
+	}
+
+	if !recordingparse.SameVariant(a.Name, b.Name) {
+		score.Signals = append(score.Signals, Signal{
+			Name: "variant", Value: 0, Weight: 0, Note: "recording variant differs",
+		})
+		if score.Value > m.opts.VariantMismatchCap {
+			score.Value = m.opts.VariantMismatchCap
+		}
+	}
+
+	if explicitparse.Differ(explicitparse.Detect(a.Name), explicitparse.Detect(b.Name)) {
+		score.Signals = append(score.Signals, Signal{
+			Name: "explicit", Value: 0, Weight: 0, Note: "explicit/clean differs",
+		})
+		if score.Value > m.opts.ExplicitMismatchCap {
+			score.Value = m.opts.ExplicitMismatchCap
 		}
 	}
 

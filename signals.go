@@ -244,18 +244,3 @@ func comparePlatformIDs(a, b map[Platform]string) externalIDVerdict {
 	}
 	return externalIDNone
 }
-
-// explicitnessSignal scores the difference of two explicitness values. A
-// difference is *not* strong evidence against — clean and explicit masters
-// of the same recording exist. The signal contributes a small amount when
-// both sides are known and agree.
-func explicitnessSignal(a, b Explicitness, weight float64) Signal {
-	if a == ExplicitnessUnknown || b == ExplicitnessUnknown {
-		return Signal{Name: "explicit", Weight: 0, Note: "unknown"}
-	}
-	if a == b {
-		return Signal{Name: "explicit", Value: 1.0, Weight: weight}
-	}
-	// Different: slight negative but don't punish hard.
-	return Signal{Name: "explicit", Value: 0.6, Weight: weight, Note: "different masters"}
-}

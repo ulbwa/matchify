@@ -135,14 +135,21 @@ var cosmeticPattern = regexp.MustCompile(
 )
 
 // cosmeticAlternation is the set of tokens considered purely cosmetic.
+//
+// Notably absent: "explicit" and "clean". Two releases that differ only in
+// their explicit vs clean master are distinct products — stripping those
+// labels would cause them to collide under normalisation. They are handled
+// instead by the explicitparse package and the per-type matcher's
+// ExplicitMismatchCap option.
+//
+// Also absent: "live", "acoustic", "remix", "demo", "unplugged",
+// "stripped", "extended cut", etc. — those denote different recordings and
+// are handled by the recordingparse package.
 const cosmeticAlternation = `` +
 	`\d{4}\s+remaster(?:ed)?|` +
 	`remaster(?:ed)?(?:\s+\d{4})?|` +
 	`digital(?:ly)?\s+remaster(?:ed)?|` +
 	`digital\s+version|` +
-	`explicit(?:\s+version)?|` +
-	`clean(?:\s+version)?|` +
-	`edited(?:\s+version)?|` +
 	`album\s+version|` +
 	`original\s+version|` +
 	`single\s+version|` +

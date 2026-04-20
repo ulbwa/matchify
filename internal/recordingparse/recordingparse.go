@@ -17,6 +17,7 @@ type Marker string
 const (
 	MarkerLive         Marker = "live"
 	MarkerAcoustic     Marker = "acoustic"
+	MarkerStripped     Marker = "stripped"
 	MarkerUnplugged    Marker = "unplugged"
 	MarkerRemix        Marker = "remix"
 	MarkerDemo         Marker = "demo"
@@ -26,6 +27,7 @@ const (
 	MarkerPiano        Marker = "piano"
 	MarkerOrchestral   Marker = "orchestral"
 	MarkerExtendedMix  Marker = "extended_mix"
+	MarkerExtendedCut  Marker = "extended_cut"
 	MarkerRadioEdit    Marker = "radio_edit"
 	MarkerSession      Marker = "session"
 	MarkerRerecording  Marker = "rerecording"
@@ -41,10 +43,12 @@ var markerPatterns = []struct {
 	re     *regexp.Regexp
 }{
 	{MarkerExtendedMix, regexp.MustCompile(`(?i)\bextended\s+(?:mix|version|edit)\b`)},
+	{MarkerExtendedCut, regexp.MustCompile(`(?i)\bextended\s+cut\b`)},
 	{MarkerRadioEdit, regexp.MustCompile(`(?i)\bradio\s+edit\b`)},
 	{MarkerLive, regexp.MustCompile(`(?i)\blive(?:\s+(?:at|in|from)\b|\s*(?:session|version|recording|performance)\b|\s*$|\s*[\)\]])`)},
 	{MarkerUnplugged, regexp.MustCompile(`(?i)\bunplugged\b`)},
 	{MarkerAcoustic, regexp.MustCompile(`(?i)\bacoustic(?:\s+version)?\b`)},
+	{MarkerStripped, regexp.MustCompile(`(?i)\bstripped(?:\s+(?:version|down|back))?\b`)},
 	{MarkerRerecording, regexp.MustCompile(`(?i)\bre-?(?:recorded|recording)\b|\btaylor'?s\s+version\b`)},
 	{MarkerRemix, regexp.MustCompile(`(?i)\b(?:[-\w]+\s+)?remix\b`)},
 	{MarkerDemo, regexp.MustCompile(`(?i)\bdemo(?:\s+version)?\b`)},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ulbwa/matchify/internal/explicitparse"
 	"github.com/ulbwa/matchify/internal/featparse"
 	"github.com/ulbwa/matchify/internal/recordingparse"
 	"github.com/ulbwa/matchify/internal/textnorm"
@@ -35,10 +36,12 @@ type TrackMatcherOptions struct {
 	// numbers when both sides provide them. Defaults to 0.5.
 	TrackPositionWeight float64
 
-	// ExplicitWeight controls the contribution of explicitness agreement.
-	// Defaults to 0.2 — a small bonus, since clean and explicit masters
-	// of the same song should still match.
-	ExplicitWeight float64
+	// ExplicitMismatchCap caps the score when the two tracks disagree on
+	// their explicit/clean status (either via the Explicit field or
+	// inferred from "(Clean)" / "(Explicit)" in the title). Clean and
+	// explicit masters are distinct products and must not collapse into
+	// one. Defaults to 0.3; set to 1 to disable.
+	ExplicitMismatchCap float64
 
 	// ISRCMismatchCap caps the score when both sides declare an ISRC and
 	// the codes differ. Defaults to 0.4; set to 1 to disable the cap.
@@ -72,7 +75,7 @@ func NewTrackMatcher(opts TrackMatcherOptions) *TrackMatcher {
 	applyDefault(&opts.DurationWeight, 1)
 	applyDefault(&opts.AlbumWeight, 1)
 	applyDefault(&opts.TrackPositionWeight, 0.5)
-	applyDefault(&opts.ExplicitWeight, 0.2)
+	applyDefault(&opts.ExplicitMismatchCap, 0.3)
 	applyDefault(&opts.ISRCMismatchCap, 0.4)
 	applyDefault(&opts.VariantMismatchCap, 0.5)
 	applyDefault(&opts.DurationMismatchSeconds, 30)
@@ -137,9 +140,16 @@ func (m *TrackMatcher) Match(ctx context.Context, a, b Track) Score {
 		})
 	}
 
-	signals = append(signals, explicitnessSignal(a.Explicit, b.Explicit, m.opts.ExplicitWeight))
-
 	score := scoreOf(signals...)
+
+	if effectiveExplicitnessDiffers(a, b) {
+		score.Signals = append(score.Signals, Signal{
+			Name: "explicit", Value: 0, Weight: 0, Note: "explicit/clean differs",
+		})
+		if score.Value > m.opts.ExplicitMismatchCap {
+			score.Value = m.opts.ExplicitMismatchCap
+		}
+	}
 
 	if !recordingparse.SameVariant(a.Name, b.Name) {
 		score.Signals = append(score.Signals, Signal{
@@ -257,5 +267,35 @@ func containsArtistByName(list []Artist, candidate string) bool {
 func applyDefault(v *float64, def float64) {
 	if *v == 0 {
 		*v = def
+	}
+}
+
+// effectiveExplicitnessDiffers reports whether two tracks disagree on their
+// explicit/clean status. The effective explicitness of a side is its
+// Explicit field when known, otherwise the value parsed from the name.
+// Two sides "differ" only when both have a known effective value and those
+// values disagree.
+func effectiveExplicitnessDiffers(a, b Track) bool {
+	ea := effectiveExplicitness(a)
+	eb := effectiveExplicitness(b)
+	if ea == ExplicitnessUnknown || eb == ExplicitnessUnknown {
+		return false
+	}
+	return ea != eb
+}
+
+// effectiveExplicitness returns the track's Explicit field if set, else
+// parses the name for "(Clean)" / "(Explicit)" markers.
+func effectiveExplicitness(t Track) Explicitness {
+	if t.Explicit != ExplicitnessUnknown {
+		return t.Explicit
+	}
+	switch explicitparse.Detect(t.Name) {
+	case explicitparse.Clean:
+		return ExplicitnessClean
+	case explicitparse.Explicit:
+		return ExplicitnessExplicit
+	default:
+		return ExplicitnessUnknown
 	}
 }
