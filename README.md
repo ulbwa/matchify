@@ -29,10 +29,13 @@ Requires Go 1.26 or newer.
   `MBID`, and per-platform external IDs are treated as ground truth when
   both sides provide them.
 - **Feat-aware.** Spotify keeps featured artists in the artist array,
-  Apple Music inlines them in the title, Tidal/Qobuz vary. `matchify`
-  extracts featured credits from titles (`feat.`, `ft.`, `featuring`,
-  `with`, paren/bracket/dash/inline forms) and merges them into the
-  artist list before comparing.
+  Apple Music inlines them in the title, Tidal/Qobuz vary, Deezer often
+  puts the whole credit ("Artist1 feat. Artist2" or "Artist1 & Artist2")
+  into a single artist entry. `matchify` extracts feature clauses from
+  titles (`feat.`, `ft.`, `featuring`, `with`, paren/bracket/dash/inline
+  forms), splits composite artist entries on feature markers and on
+  `&` / `,` / `and`, and merges everything into a canonical list before
+  comparing.
 - **Edition / variant aware.**
   - Cosmetic markers like `(Remastered)`, `(Explicit)`, `- Digital
     Remaster` normalise out so they don't affect the score.

@@ -96,3 +96,67 @@ func splitArtists(s string) []string {
 	}
 	return out
 }
+
+// nameFeatPattern matches a feature marker used inside an artist-name field
+// (not a title). In the artist-field context, "with" is a common feature
+// marker ("Drake with DJ Khaled") so it is included here — distinguishing
+// this from title context where "with" has many false positives.
+var nameFeatPattern = regexp.MustCompile(`(?i)\s+(?:feat\.?|ft\.?|featuring|with)\s+`)
+
+// SplitCompositeName splits a single artist-credit string into the
+// individual artist names it contains.
+//
+// Some platforms (notably Deezer) ship a track's artists as a single
+// composite string such as "Luis Fonsi feat. Daddy Yankee" or
+// "Glass Animals & Denzel Curry" instead of a list of distinct names.
+// SplitCompositeName canonicalises such inputs so that downstream matchers
+// can compare them against platforms that provide separate entries.
+//
+// Recognised markers:
+//   - "feat.", "ft.", "featuring", "with" clauses anywhere in the name
+//   - "&", "," and " and " separators at top level
+//
+// If the input contains no markers, SplitCompositeName returns a single-
+// element slice with the trimmed input.
+//
+// Caveat: a legitimate band name with an ampersand ("Simon & Garfunkel") is
+// split into its parts. In cross-platform matching this is symmetrical and
+// rarely produces a false negative — both platforms are likely to represent
+// the band the same way.
+func SplitCompositeName(name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+
+	body := name
+	var trailing string
+	if loc := nameFeatPattern.FindStringIndex(name); loc != nil {
+		body = strings.TrimSpace(name[:loc[0]])
+		trailing = strings.TrimSpace(name[loc[1]:])
+	}
+
+	parts := splitPattern.Split(body, -1)
+	if trailing != "" {
+		parts = append(parts, splitPattern.Split(trailing, -1)...)
+	}
+
+	seen := make(map[string]struct{}, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		key := strings.ToLower(p)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return []string{name}
+	}
+	return out
+}

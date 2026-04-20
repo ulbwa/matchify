@@ -3,6 +3,7 @@ package matchify
 import (
 	"time"
 
+	"github.com/ulbwa/matchify/internal/featparse"
 	"github.com/ulbwa/matchify/internal/textnorm"
 	"github.com/ulbwa/matchify/internal/textsim"
 )
@@ -68,11 +69,18 @@ func artistNameSimilarity(a, b Artist) float64 {
 }
 
 // artistListSignal returns a signal representing the similarity between two
-// lists of artists. The algorithm is greedy assignment — for each artist in
-// the shorter list, pick the best remaining match in the longer list. The
-// final value is the sum of best pairwise similarities divided by the length
-// of the longer list, which penalises extra artists on either side.
+// lists of artists. Both lists are first normalised via expandComposites so
+// that a Deezer-style "A feat. B" or "A & B" single entry is split into its
+// constituent names; this makes the signal symmetrical against Spotify-
+// style lists where each credited artist gets its own entry.
+//
+// The algorithm is greedy assignment — for each artist in the shorter list,
+// pick the best remaining match in the longer list. The final value is the
+// sum of best pairwise similarities divided by the length of the longer
+// list, which penalises extra artists on either side.
 func artistListSignal(a, b []Artist, weight float64) Signal {
+	a = expandComposites(a)
+	b = expandComposites(b)
 	switch {
 	case len(a) == 0 && len(b) == 0:
 		return Signal{Name: "artists", Weight: 0, Note: "both empty"}
@@ -109,6 +117,27 @@ func artistListSignal(a, b []Artist, weight float64) Signal {
 		Value:  total / float64(len(long)),
 		Weight: weight,
 	}
+}
+
+// expandComposites walks an Artist list and replaces any entry whose name
+// contains feature or list markers with multiple name-only Artist entries,
+// one per extracted name. Entries whose names are atomic pass through
+// unchanged; the original metadata (MBID, ExternalIDs, Aliases) is
+// preserved for those. Split entries do not inherit metadata because it
+// applied to the composite identity rather than each individual.
+func expandComposites(artists []Artist) []Artist {
+	var out []Artist
+	for _, a := range artists {
+		names := featparse.SplitCompositeName(a.Name)
+		if len(names) <= 1 {
+			out = append(out, a)
+			continue
+		}
+		for _, n := range names {
+			out = append(out, Artist{Name: n})
+		}
+	}
+	return out
 }
 
 // durationSignal scores the similarity of two track durations. A difference

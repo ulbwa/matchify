@@ -48,6 +48,39 @@ func TestExtractFeatures(t *testing.T) {
 	}
 }
 
+func TestSplitCompositeName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"atomic", "Luis Fonsi", []string{"Luis Fonsi"}},
+		{"empty", "", nil},
+		{"whitespace only", "   ", nil},
+		{"feat.", "Luis Fonsi feat. Daddy Yankee", []string{"Luis Fonsi", "Daddy Yankee"}},
+		{"ft.", "Drake ft. Future", []string{"Drake", "Future"}},
+		{"featuring", "Eminem featuring Rihanna", []string{"Eminem", "Rihanna"}},
+		{"with", "Drake with DJ Khaled", []string{"Drake", "DJ Khaled"}},
+		{"ampersand", "Glass Animals & Denzel Curry", []string{"Glass Animals", "Denzel Curry"}},
+		{"comma", "A, B, C", []string{"A", "B", "C"}},
+		{"and", "A and B", []string{"A", "B"}},
+		{"complex", "A feat. B, C & D", []string{"A", "B", "C", "D"}},
+		{"dedup", "A & A", []string{"A"}},
+		{"case sensitive dedup", "A & a", []string{"A"}},
+		{"trim", "  A   &   B  ", []string{"A", "B"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := SplitCompositeName(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("SplitCompositeName(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func FuzzExtractFeaturesStability(f *testing.F) {
 	f.Add("Despacito (feat. Justin Bieber)")
 	f.Add("Blinding Lights")

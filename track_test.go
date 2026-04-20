@@ -176,6 +176,47 @@ func TestTrackMatcher_CrossPlatformSameTrack(t *testing.T) {
 				Duration: 181 * time.Second,
 			},
 		},
+		{
+			// Deezer-style composite: feat is inside the single artist
+			// entry, not in the title or the artist list.
+			name: "deezer feat in artist name vs spotify separate entries",
+			a: Track{
+				Name:     "Despacito",
+				Artists:  []Artist{{Name: "Luis Fonsi feat. Daddy Yankee"}},
+				Duration: 228 * time.Second,
+			},
+			b: Track{
+				Name:     "Despacito",
+				Artists:  []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}},
+				Duration: 228 * time.Second,
+			},
+		},
+		{
+			name: "ampersand composite vs separate entries",
+			a: Track{
+				Name:     "Tokyo Drifting",
+				Artists:  []Artist{{Name: "Glass Animals & Denzel Curry"}},
+				Duration: 210 * time.Second,
+			},
+			b: Track{
+				Name:     "Tokyo Drifting",
+				Artists:  []Artist{{Name: "Glass Animals"}, {Name: "Denzel Curry"}},
+				Duration: 210 * time.Second,
+			},
+		},
+		{
+			name: "comma composite vs separate entries",
+			a: Track{
+				Name:     "No Role Modelz",
+				Artists:  []Artist{{Name: "J. Cole, Young Thug"}},
+				Duration: 287 * time.Second,
+			},
+			b: Track{
+				Name:     "No Role Modelz",
+				Artists:  []Artist{{Name: "J. Cole"}, {Name: "Young Thug"}},
+				Duration: 287 * time.Second,
+			},
+		},
 	}
 
 	for _, tc := range cases {
