@@ -47,6 +47,11 @@ type TrackMatcherOptions struct {
 	// the codes differ. Defaults to 0.4; set to 1 to disable the cap.
 	ISRCMismatchCap float64
 
+	// PlatformIDMismatchCap caps the score when both sides share a
+	// platform key and that platform's IDs disagree (e.g. two different
+	// Spotify IDs). Defaults to 0.4; set to 1 to disable the cap.
+	PlatformIDMismatchCap float64
+
 	// VariantMismatchCap caps the score when the two titles contain
 	// different sets of recording-variant markers (live, acoustic, remix,
 	// demo, ...). Defaults to 0.5; set to 1 to disable the cap.
@@ -77,6 +82,7 @@ func NewTrackMatcher(opts TrackMatcherOptions) *TrackMatcher {
 	applyDefault(&opts.TrackPositionWeight, 0.5)
 	applyDefault(&opts.ExplicitMismatchCap, 0.3)
 	applyDefault(&opts.ISRCMismatchCap, 0.4)
+	applyDefault(&opts.PlatformIDMismatchCap, 0.4)
 	applyDefault(&opts.VariantMismatchCap, 0.5)
 	applyDefault(&opts.DurationMismatchSeconds, 30)
 	applyDefault(&opts.DurationMismatchCap, 0.55)
@@ -165,10 +171,12 @@ func (m *TrackMatcher) Match(ctx context.Context, a, b Track) Score {
 		if diff < 0 {
 			diff = -diff
 		}
-		limit := time.Duration(m.opts.DurationMismatchSeconds) * time.Second
+		// Multiply as float64 first so fractional seconds (e.g. 2.5)
+		// don't get truncated by the integer-nanosecond cast.
+		limit := time.Duration(m.opts.DurationMismatchSeconds * float64(time.Second))
 		if diff > limit {
 			score.Signals = append(score.Signals, Signal{
-				Name: "duration", Value: 0, Weight: 0, Note: "large duration mismatch",
+				Name: "duration_cap", Value: 0, Weight: 0, Note: "large duration mismatch",
 			})
 			if score.Value > m.opts.DurationMismatchCap {
 				score.Value = m.opts.DurationMismatchCap
@@ -194,8 +202,8 @@ func (m *TrackMatcher) Match(ctx context.Context, a, b Track) Score {
 			Weight: 0,
 			Note:   "platform ID mismatch",
 		})
-		if score.Value > m.opts.ISRCMismatchCap {
-			score.Value = m.opts.ISRCMismatchCap
+		if score.Value > m.opts.PlatformIDMismatchCap {
+			score.Value = m.opts.PlatformIDMismatchCap
 		}
 	}
 

@@ -2,7 +2,6 @@ package versionparse
 
 import (
 	"reflect"
-	"sort"
 	"testing"
 )
 
@@ -94,16 +93,19 @@ func TestHasAny(t *testing.T) {
 
 func TestMarkerOrderStable(t *testing.T) {
 	t.Parallel()
-	// Multiple markers should return in stable canonical order (order of definition).
+	// Multiple markers must return in the order defined by markerPatterns
+	// (more specific before less specific), so that callers can rely on
+	// a stable canonical ordering. Do NOT sort before comparing — that
+	// would defeat the purpose of the test.
 	got := Markers("Album (Deluxe, Remastered)")
-	if len(got) != 2 {
-		t.Fatalf("expected 2 markers, got %v", got)
-	}
-	// Build sorted canonical for comparison.
 	want := []Marker{MarkerDeluxe, MarkerRemaster}
-	sort.Slice(got, func(i, j int) bool { return string(got[i]) < string(got[j]) })
-	sort.Slice(want, func(i, j int) bool { return string(want[i]) < string(want[j]) })
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got markers %v, want %v", got, want)
+		t.Errorf("got markers %v, want %v (canonical order is pattern-definition order)", got, want)
+	}
+
+	// Reversing the markers in the input must not change the output order.
+	got2 := Markers("Album (Remastered, Deluxe)")
+	if !reflect.DeepEqual(got2, want) {
+		t.Errorf("input order should not affect output: got %v, want %v", got2, want)
 	}
 }

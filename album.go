@@ -34,14 +34,26 @@ type AlbumMatcherOptions struct {
 	// Defaults to 0.3.
 	TypeWeight float64
 
-	// EditionPenalty is subtracted from Value when both sides have
-	// version markers and they disagree (e.g. plain vs Deluxe). Defaults
-	// to 0.1. Set to 0 to treat all editions as equivalent.
+	// EditionPenalty is subtracted from Value when the two sides'
+	// edition markers disagree (e.g. plain vs Deluxe). Defaults to 0.1
+	// when the zero value is passed. To disable the penalty, set
+	// DisableEditionPenalty to true; setting EditionPenalty to 0 is
+	// indistinguishable from "not set" and receives the default.
 	EditionPenalty float64
+
+	// DisableEditionPenalty suppresses EditionPenalty entirely, so that
+	// plain and edition-marked versions score identically on name and
+	// metadata alone.
+	DisableEditionPenalty bool
 
 	// UPCMismatchCap caps the score when both sides declare a UPC and
 	// the codes differ. Defaults to 0.4; set to 1 to disable.
 	UPCMismatchCap float64
+
+	// PlatformIDMismatchCap caps the score when both sides share a
+	// platform key and that platform's IDs disagree. Defaults to 0.4;
+	// set to 1 to disable.
+	PlatformIDMismatchCap float64
 
 	// VariantMismatchCap caps the score when the album names contain
 	// different sets of recording-variant markers (e.g. plain vs
@@ -70,6 +82,7 @@ func NewAlbumMatcher(opts AlbumMatcherOptions) *AlbumMatcher {
 	applyDefault(&opts.TypeWeight, 0.3)
 	applyDefault(&opts.EditionPenalty, 0.1)
 	applyDefault(&opts.UPCMismatchCap, 0.4)
+	applyDefault(&opts.PlatformIDMismatchCap, 0.4)
 	applyDefault(&opts.VariantMismatchCap, 0.5)
 	applyDefault(&opts.ExplicitMismatchCap, 0.3)
 	return &AlbumMatcher{opts: opts}
@@ -119,7 +132,7 @@ func (m *AlbumMatcher) Match(ctx context.Context, a, b Album) Score {
 
 	score := scoreOf(signals...)
 
-	if !versionparse.SameEdition(a.Name, b.Name) {
+	if !m.opts.DisableEditionPenalty && !versionparse.SameEdition(a.Name, b.Name) {
 		markersA := versionparse.Markers(a.Name)
 		markersB := versionparse.Markers(b.Name)
 		if len(markersA) > 0 || len(markersB) > 0 {
@@ -166,8 +179,8 @@ func (m *AlbumMatcher) Match(ctx context.Context, a, b Album) Score {
 		score.Signals = append(score.Signals, Signal{
 			Name: "platform_id", Value: 0, Weight: 0, Note: "platform ID mismatch",
 		})
-		if score.Value > m.opts.UPCMismatchCap {
-			score.Value = m.opts.UPCMismatchCap
+		if score.Value > m.opts.PlatformIDMismatchCap {
+			score.Value = m.opts.PlatformIDMismatchCap
 		}
 	}
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/ulbwa/matchify/internal/textnorm"
 )
 
@@ -49,6 +51,12 @@ type ArtistMatcherOptions struct {
 	// ReleaseProbeMax is the name similarity above which release probing
 	// is unnecessary — the names already agree. Defaults to 0.95.
 	ReleaseProbeMax float64
+
+	// PlatformIDMismatchCap caps the score when both sides share a
+	// platform key and that platform's IDs disagree — such artists are
+	// known-distinct on that platform. Defaults to 0.4; set to 1 to
+	// disable.
+	PlatformIDMismatchCap float64
 }
 
 // ArtistMatcher scores the similarity of two Artist values. If a
@@ -60,6 +68,13 @@ type ArtistMatcher struct {
 	releaseCacheMu sync.Mutex
 	releaseCache   map[string][]Album
 	releaseErrors  map[string]error
+
+	// releaseFetch deduplicates concurrent provider calls for the same
+	// artist identity. Without it, two goroutines racing through Match
+	// for the same artist would both miss the cache and fire parallel
+	// provider calls, which is wasteful when the provider is expensive
+	// or rate-limited.
+	releaseFetch singleflight.Group
 }
 
 // NewArtistMatcher returns an ArtistMatcher with the given options.
@@ -69,6 +84,7 @@ func NewArtistMatcher(opts ArtistMatcherOptions) *ArtistMatcher {
 	applyDefault(&opts.ReleaseOverlapThreshold, DefaultAlbumThreshold)
 	applyDefault(&opts.ReleaseProbeMin, 0.6)
 	applyDefault(&opts.ReleaseProbeMax, 0.95)
+	applyDefault(&opts.PlatformIDMismatchCap, 0.4)
 	if opts.ReleaseProvider != nil && opts.AlbumMatcher == nil {
 		opts.AlbumMatcher = NewAlbumMatcher(AlbumMatcherOptions{})
 	}
@@ -106,14 +122,20 @@ func (m *ArtistMatcher) Match(ctx context.Context, a, b Artist) Score {
 	if m.opts.ReleaseProvider != nil &&
 		nameSim >= m.opts.ReleaseProbeMin &&
 		nameSim < m.opts.ReleaseProbeMax {
-		if m.releasesOverlap(ctx, a, b) {
+		overlap, probed := m.releasesOverlap(ctx, a, b)
+		switch {
+		case !probed:
+			// Provider failed or returned nothing usable — per
+			// ReleaseProvider's documented contract, fall back to the
+			// name-based score by emitting no release_overlap signal.
+		case overlap:
 			signals = append(signals, Signal{
 				Name:   "release_overlap",
 				Value:  1,
 				Weight: m.opts.ReleaseOverlapWeight,
 				Note:   "shared release found",
 			})
-		} else {
+		default:
 			signals = append(signals, Signal{
 				Name:   "release_overlap",
 				Value:  0,
@@ -130,8 +152,8 @@ func (m *ArtistMatcher) Match(ctx context.Context, a, b Artist) Score {
 		score.Signals = append(score.Signals, Signal{
 			Name: "platform_id", Value: 0, Weight: 0, Note: "platform ID mismatch",
 		})
-		if score.Value > 0.4 {
-			score.Value = 0.4
+		if score.Value > m.opts.PlatformIDMismatchCap {
+			score.Value = m.opts.PlatformIDMismatchCap
 		}
 		return score
 	}
@@ -139,33 +161,37 @@ func (m *ArtistMatcher) Match(ctx context.Context, a, b Artist) Score {
 	return scoreOf(signals...)
 }
 
-// releasesOverlap fetches both artists' discographies and returns true as
-// soon as any pair of releases matches under the configured
-// AlbumMatcher/threshold. Releases are cached per matcher instance.
-func (m *ArtistMatcher) releasesOverlap(ctx context.Context, a, b Artist) bool {
+// releasesOverlap looks for a release shared between a and b. The second
+// return value reports whether the probe completed — false means at least
+// one provider call failed and the caller should fall back to name-only
+// scoring rather than treating absence of overlap as evidence against a
+// match.
+func (m *ArtistMatcher) releasesOverlap(ctx context.Context, a, b Artist) (overlap, probed bool) {
 	relA, okA := m.releasesOf(ctx, a)
 	if !okA {
-		return false
+		return false, false
 	}
 	relB, okB := m.releasesOf(ctx, b)
 	if !okB {
-		return false
+		return false, false
 	}
 	for _, ra := range relA {
 		if err := ctx.Err(); err != nil {
-			return false
+			return false, false
 		}
 		for _, rb := range relB {
 			if m.opts.AlbumMatcher.Match(ctx, ra, rb).Above(m.opts.ReleaseOverlapThreshold) {
-				return true
+				return true, true
 			}
 		}
 	}
-	return false
+	return false, true
 }
 
 func (m *ArtistMatcher) releasesOf(ctx context.Context, a Artist) ([]Album, bool) {
 	key := artistCacheKey(a)
+
+	// Fast path: cache hit.
 	m.releaseCacheMu.Lock()
 	if rel, ok := m.releaseCache[key]; ok {
 		m.releaseCacheMu.Unlock()
@@ -177,14 +203,36 @@ func (m *ArtistMatcher) releasesOf(ctx context.Context, a Artist) ([]Album, bool
 	}
 	m.releaseCacheMu.Unlock()
 
-	rel, err := m.opts.ReleaseProvider.Releases(ctx, a)
-	m.releaseCacheMu.Lock()
-	defer m.releaseCacheMu.Unlock()
+	// Slow path: delegate to singleflight so concurrent callers for the
+	// same key share a single provider call.
+	v, err, _ := m.releaseFetch.Do(key, func() (any, error) {
+		// Re-check the cache after acquiring the singleflight slot; an
+		// earlier winner may have populated it while we were waiting.
+		m.releaseCacheMu.Lock()
+		if rel, ok := m.releaseCache[key]; ok {
+			m.releaseCacheMu.Unlock()
+			return rel, nil
+		}
+		if cachedErr, ok := m.releaseErrors[key]; ok {
+			m.releaseCacheMu.Unlock()
+			return nil, cachedErr
+		}
+		m.releaseCacheMu.Unlock()
+
+		rel, err := m.opts.ReleaseProvider.Releases(ctx, a)
+		m.releaseCacheMu.Lock()
+		defer m.releaseCacheMu.Unlock()
+		if err != nil {
+			m.releaseErrors[key] = err
+			return nil, err
+		}
+		m.releaseCache[key] = rel
+		return rel, nil
+	})
 	if err != nil {
-		m.releaseErrors[key] = err
 		return nil, false
 	}
-	m.releaseCache[key] = rel
+	rel, _ := v.([]Album)
 	return rel, true
 }
 

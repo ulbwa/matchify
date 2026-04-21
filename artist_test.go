@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestArtistMatcher_AuthoritativeIDs(t *testing.T) {
@@ -157,6 +159,74 @@ func TestArtistMatcher_ReleaseProviderError(t *testing.T) {
 	s := m.Match(ctx, a, b)
 	if s.Value > DefaultArtistThreshold {
 		t.Errorf("fallback to name failure should not pass threshold: %v", s)
+	}
+}
+
+// TestArtistMatcher_ProviderErrorDoesNotPenalise asserts that a failing
+// provider doesn't inject a negative release_overlap signal (which would
+// drop the score below what name-only scoring would yield). Regression
+// test for the review comment on the original artist.go:123.
+func TestArtistMatcher_ProviderErrorDoesNotPenalise(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	nameOnly := NewArtistMatcher(ArtistMatcherOptions{})
+	withFailingProvider := NewArtistMatcher(ArtistMatcherOptions{
+		ReleaseProvider: &fakeProvider{err: errors.New("boom")},
+	})
+
+	a := Artist{Name: "Cardi B"}
+	b := Artist{Name: "Kardi"}
+	nameScore := nameOnly.Match(ctx, a, b).Value
+	failScore := withFailingProvider.Match(ctx, a, b).Value
+	if failScore < nameScore-1e-9 {
+		t.Errorf("failing provider should not lower the score below name-only: name=%v, fail=%v",
+			nameScore, failScore)
+	}
+}
+
+// TestArtistMatcher_ConcurrentFetchDedup asserts that simultaneous Match
+// calls for the same artist identity share a single provider call, not
+// one per goroutine.
+func TestArtistMatcher_ConcurrentFetchDedup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Slow provider so the race window is clearly observable.
+	var mu sync.Mutex
+	calls := 0
+	provider := ReleaseProviderFunc(func(ctx context.Context, artist Artist) ([]Album, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		return []Album{{Name: "Shared Release"}}, nil
+	})
+
+	m := NewArtistMatcher(ArtistMatcherOptions{ReleaseProvider: provider})
+	a := Artist{Name: "Cardi B"}
+	b := Artist{Name: "Kardi"}
+
+	var wg sync.WaitGroup
+	const workers = 16
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.Match(ctx, a, b)
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	total := calls
+	mu.Unlock()
+	// Expect exactly one call per unique artist (2 total), not per
+	// goroutine. Allow up to a few (some scheduling slack) but never
+	// scale with worker count.
+	if total > 4 {
+		t.Errorf("expected singleflight dedup to keep fetches bounded; got %d for %d workers",
+			total, workers)
 	}
 }
 

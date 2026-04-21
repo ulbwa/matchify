@@ -143,6 +143,26 @@ func TestAlbumMatcher_DeluxeEditionPenalty(t *testing.T) {
 	}
 }
 
+func TestAlbumMatcher_DisableEditionPenalty(t *testing.T) {
+	t.Parallel()
+	plain := Album{Name: "1989", Artists: []Artist{{Name: "Taylor Swift"}}}
+	deluxe := Album{Name: "1989 (Deluxe Edition)", Artists: []Artist{{Name: "Taylor Swift"}}}
+	ctx := context.Background()
+
+	with := NewAlbumMatcher(AlbumMatcherOptions{})
+	without := NewAlbumMatcher(AlbumMatcherOptions{DisableEditionPenalty: true})
+
+	swith := with.Match(ctx, plain, deluxe).Value
+	swithout := without.Match(ctx, plain, deluxe).Value
+
+	if swithout <= swith {
+		t.Errorf("DisableEditionPenalty should eliminate the penalty: with=%v, without=%v", swith, swithout)
+	}
+	if delta := swithout - swith; delta < 0.09 || delta > 0.11 {
+		t.Errorf("expected penalty ≈ 0.1, got delta=%v (with=%v, without=%v)", delta, swith, swithout)
+	}
+}
+
 func TestAlbumMatcher_DifferentAlbumsDoNotMatch(t *testing.T) {
 	t.Parallel()
 	m := NewAlbumMatcher(AlbumMatcherOptions{})

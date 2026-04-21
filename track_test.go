@@ -368,6 +368,37 @@ func TestTrackMatcher_ShouldNotMatch(t *testing.T) {
 	}
 }
 
+// TestTrackMatcher_FractionalDurationMismatch asserts that fractional
+// DurationMismatchSeconds values aren't truncated by the Duration
+// conversion. Regression test for the review comment on track.go:168.
+func TestTrackMatcher_FractionalDurationMismatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Two tracks 3s apart with a fractional 2.5s cap should trip the
+	// cap (3 > 2.5); if the float were truncated to 2s, the check would
+	// trip too, so invert: two tracks 2s apart should NOT trip a 2.5s
+	// cap. If truncated to 2s, the 2s diff would trip.
+	m := NewTrackMatcher(TrackMatcherOptions{
+		DurationMismatchSeconds: 2.5,
+		DurationMismatchCap:     0.1,
+	})
+	a := Track{
+		Name:     "Song",
+		Artists:  []Artist{{Name: "Artist"}},
+		Duration: 180 * time.Second,
+	}
+	b := Track{
+		Name:     "Song",
+		Artists:  []Artist{{Name: "Artist"}},
+		Duration: 182 * time.Second,
+	}
+	s := m.Match(ctx, a, b)
+	if s.Value <= 0.5 {
+		t.Errorf("fractional cap was likely truncated; expected no cap for 2s diff with 2.5s limit, got %v", s)
+	}
+}
+
 func TestTrackMatcher_MissingFields(t *testing.T) {
 	t.Parallel()
 	m := NewTrackMatcher(TrackMatcherOptions{})
