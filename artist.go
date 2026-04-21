@@ -15,81 +15,107 @@ import (
 // considered a likely match under the default weights.
 const DefaultArtistThreshold = 0.85
 
-// ArtistMatcherOptions configures an ArtistMatcher.
-type ArtistMatcherOptions struct {
-	// ReleaseProvider, if non-nil, is consulted when name-based scoring
-	// is ambiguous. The matcher fetches each artist's discography once
-	// per unique identity (per matcher instance) and looks for a single
-	// release that matches under AlbumMatcher; a match there lifts the
-	// artist score above the threshold.
-	ReleaseProvider ReleaseProvider
-
-	// AlbumMatcher compares individual releases. If nil and
-	// ReleaseProvider is set, a default AlbumMatcher is used.
-	AlbumMatcher *AlbumMatcher
-
-	// NameWeight controls how strongly the artist name (and aliases)
-	// drives the score. Defaults to 1.
-	NameWeight float64
-
-	// ReleaseOverlapWeight controls the contribution when at least one
-	// release matches. Defaults to 1 — equal to name weight, so finding
-	// an overlapping release brings an ambiguous score decisively above
-	// threshold.
-	ReleaseOverlapWeight float64
-
-	// ReleaseOverlapThreshold is the album-score threshold used when
-	// searching for an overlapping release. Defaults to
-	// DefaultAlbumThreshold.
-	ReleaseOverlapThreshold float64
-
-	// ReleaseProbeMin is the minimum name similarity at which release
-	// probing becomes worthwhile — below this the names are too
-	// different to bother. Defaults to 0.6.
-	ReleaseProbeMin float64
-
-	// ReleaseProbeMax is the name similarity above which release probing
-	// is unnecessary — the names already agree. Defaults to 0.95.
-	ReleaseProbeMax float64
-
-	// PlatformIDMismatchCap caps the score when both sides share a
-	// platform key and that platform's IDs disagree — such artists are
-	// known-distinct on that platform. Defaults to 0.4; set to 1 to
-	// disable.
-	PlatformIDMismatchCap float64
+// artistConfig holds the tunable parameters of an ArtistMatcher.
+type artistConfig struct {
+	nameWeight              float64
+	releaseOverlapWeight    float64
+	releaseOverlapThreshold float64
+	releaseProbeMin         float64
+	releaseProbeMax         float64
+	platformIDMismatchCap   float64
+	provider                ReleaseProvider
+	albumMatcher            *AlbumMatcher
 }
 
-// ArtistMatcher scores the similarity of two Artist values. If a
-// ReleaseProvider is configured, it can resolve ambiguous name matches by
-// looking for at least one overlapping release.
+func defaultArtistConfig() artistConfig {
+	return artistConfig{
+		nameWeight:              1,
+		releaseOverlapWeight:    1,
+		releaseOverlapThreshold: DefaultAlbumThreshold,
+		releaseProbeMin:         0.6,
+		releaseProbeMax:         0.95,
+		platformIDMismatchCap:   0.4,
+	}
+}
+
+// ArtistOption is a functional option for NewArtistMatcher.
+type ArtistOption func(*artistConfig)
+
+// ArtistNameWeight sets the weight of the artist-name similarity
+// (default 1).
+func ArtistNameWeight(w float64) ArtistOption {
+	return func(c *artistConfig) { c.nameWeight = w }
+}
+
+// ArtistReleaseProvider installs a ReleaseProvider that the matcher will
+// consult when name-based scoring is ambiguous. Without a provider the
+// matcher relies on names and aliases alone.
+func ArtistReleaseProvider(p ReleaseProvider) ArtistOption {
+	return func(c *artistConfig) { c.provider = p }
+}
+
+// ArtistAlbumMatcher installs the AlbumMatcher used when the release
+// provider finds candidate overlapping releases. Defaults to a fresh
+// NewAlbumMatcher() if unset when a ReleaseProvider is configured.
+func ArtistAlbumMatcher(m *AlbumMatcher) ArtistOption {
+	return func(c *artistConfig) { c.albumMatcher = m }
+}
+
+// ArtistReleaseOverlapWeight sets the weight of the release-probe
+// contribution when at least one release overlaps between the two
+// artists (default 1).
+func ArtistReleaseOverlapWeight(w float64) ArtistOption {
+	return func(c *artistConfig) { c.releaseOverlapWeight = w }
+}
+
+// ArtistReleaseOverlapThreshold sets the album-score threshold used to
+// decide whether two releases are considered "the same" during release
+// probing (default DefaultAlbumThreshold).
+func ArtistReleaseOverlapThreshold(t float64) ArtistOption {
+	return func(c *artistConfig) { c.releaseOverlapThreshold = t }
+}
+
+// ArtistReleaseProbeBand sets the range of name-similarity values inside
+// which release probing is worthwhile. Below min the names are too
+// different to bother; above max they already agree, so probing is
+// unnecessary. Defaults to 0.6 and 0.95.
+func ArtistReleaseProbeBand(min, max float64) ArtistOption {
+	return func(c *artistConfig) {
+		c.releaseProbeMin = min
+		c.releaseProbeMax = max
+	}
+}
+
+// ArtistPlatformIDMismatchCap caps the score when both sides share a
+// platform key and that platform's IDs disagree (default 0.4).
+func ArtistPlatformIDMismatchCap(cap float64) ArtistOption {
+	return func(c *artistConfig) { c.platformIDMismatchCap = cap }
+}
+
+// ArtistMatcher scores the similarity of two Artist values.
 type ArtistMatcher struct {
-	opts ArtistMatcherOptions
+	cfg artistConfig
 
 	releaseCacheMu sync.Mutex
 	releaseCache   map[string][]Album
 	releaseErrors  map[string]error
-
-	// releaseFetch deduplicates concurrent provider calls for the same
-	// artist identity. Without it, two goroutines racing through Match
-	// for the same artist would both miss the cache and fire parallel
-	// provider calls, which is wasteful when the provider is expensive
-	// or rate-limited.
-	releaseFetch singleflight.Group
+	releaseFetch   singleflight.Group
 }
 
-// NewArtistMatcher returns an ArtistMatcher with the given options.
-func NewArtistMatcher(opts ArtistMatcherOptions) *ArtistMatcher {
-	applyDefault(&opts.NameWeight, 1)
-	applyDefault(&opts.ReleaseOverlapWeight, 1)
-	applyDefault(&opts.ReleaseOverlapThreshold, DefaultAlbumThreshold)
-	applyDefault(&opts.ReleaseProbeMin, 0.6)
-	applyDefault(&opts.ReleaseProbeMax, 0.95)
-	applyDefault(&opts.PlatformIDMismatchCap, 0.4)
-	if opts.ReleaseProvider != nil && opts.AlbumMatcher == nil {
-		opts.AlbumMatcher = NewAlbumMatcher(AlbumMatcherOptions{})
+// NewArtistMatcher returns an ArtistMatcher with the given options
+// applied on top of the baseline defaults.
+func NewArtistMatcher(opts ...ArtistOption) *ArtistMatcher {
+	cfg := defaultArtistConfig()
+	for _, fn := range opts {
+		if fn != nil {
+			fn(&cfg)
+		}
+	}
+	if cfg.provider != nil && cfg.albumMatcher == nil {
+		cfg.albumMatcher = NewAlbumMatcher()
 	}
 	return &ArtistMatcher{
-		opts:          opts,
+		cfg:           cfg,
 		releaseCache:  map[string][]Album{},
 		releaseErrors: map[string]error{},
 	}
@@ -97,75 +123,74 @@ func NewArtistMatcher(opts ArtistMatcherOptions) *ArtistMatcher {
 
 // Match scores the similarity of a and b.
 //
-// Authoritative short-circuits (in priority order):
-//  1. Matching MBID — MusicBrainz artist identifiers.
-//  2. Matching platform ID — two artists with the same Spotify ID etc.
+// Authoritative short-circuits (each returns Relation=Same, Value≈1):
+//  1. MBID tags match — MusicBrainz artist identifiers.
+//  2. Platform-ID tags match on at least one shared platform.
 //
 // Otherwise the score is based on artist-name similarity (including
 // aliases). When the name similarity falls into the ambiguous range
-// (ReleaseProbeMin..ReleaseProbeMax) and a ReleaseProvider is configured,
-// the matcher fetches both discographies and looks for a single
-// overlapping release — one is enough to lift the score above threshold.
+// (ReleaseProbeBand) and a ReleaseProvider is configured, the matcher
+// fetches both discographies and looks for a single overlapping release
+// — one is enough to lift the score decisively.
+//
+// Artists do not have recording variants, so this matcher never returns
+// RelationVariant — the result is either Same or Unrelated.
 func (m *ArtistMatcher) Match(ctx context.Context, a, b Artist) Score {
-	if a.MBID != "" && b.MBID != "" && a.MBID == b.MBID {
-		return authoritativeScore("mbid", "MBID match", 1)
+	if mbidA, okA := a.Tags.MBID(); okA {
+		if mbidB, okB := b.Tags.MBID(); okB && mbidA == mbidB {
+			return authoritativeScore("mbid", "MBID match", 1)
+		}
 	}
-	if comparePlatformIDs(a.ExternalIDs, b.ExternalIDs) == externalIDEqual {
+	if comparePlatformIDs(a.Tags.PlatformIDs(), b.Tags.PlatformIDs()) == externalIDEqual {
 		return authoritativeScore("platform_id", "platform ID match", 1)
 	}
 
 	nameSim := artistNameSimilarity(a, b)
 	signals := []Signal{
-		{Name: "name", Value: nameSim, Weight: m.opts.NameWeight},
+		{Name: "name", Value: nameSim, Weight: m.cfg.nameWeight},
 	}
 
-	if m.opts.ReleaseProvider != nil &&
-		nameSim >= m.opts.ReleaseProbeMin &&
-		nameSim < m.opts.ReleaseProbeMax {
+	if m.cfg.provider != nil &&
+		nameSim >= m.cfg.releaseProbeMin &&
+		nameSim < m.cfg.releaseProbeMax {
 		overlap, probed := m.releasesOverlap(ctx, a, b)
 		switch {
 		case !probed:
-			// Provider failed or returned nothing usable — per
-			// ReleaseProvider's documented contract, fall back to the
-			// name-based score by emitting no release_overlap signal.
+			// Provider failed — fall back to name-only as documented.
 		case overlap:
 			signals = append(signals, Signal{
 				Name:   "release_overlap",
 				Value:  1,
-				Weight: m.opts.ReleaseOverlapWeight,
+				Weight: m.cfg.releaseOverlapWeight,
 				Note:   "shared release found",
 			})
 		default:
 			signals = append(signals, Signal{
 				Name:   "release_overlap",
 				Value:  0,
-				Weight: m.opts.ReleaseOverlapWeight,
+				Weight: m.cfg.releaseOverlapWeight,
 				Note:   "no shared release",
 			})
 		}
 	}
 
-	if comparePlatformIDs(a.ExternalIDs, b.ExternalIDs) == externalIDDifferent {
-		// Same platform, different ID — these are certainly different artists
-		// on that platform. Cap the score aggressively.
-		score := scoreOf(signals...)
+	score := scoreOf(signals...)
+
+	if comparePlatformIDs(a.Tags.PlatformIDs(), b.Tags.PlatformIDs()) == externalIDDifferent {
+		score.Relation = RelationUnrelated
 		score.Signals = append(score.Signals, Signal{
 			Name: "platform_id", Value: 0, Weight: 0, Note: "platform ID mismatch",
 		})
-		if score.Value > m.opts.PlatformIDMismatchCap {
-			score.Value = m.opts.PlatformIDMismatchCap
+		if score.Value > m.cfg.platformIDMismatchCap {
+			score.Value = m.cfg.platformIDMismatchCap
 		}
-		return score
 	}
 
-	return scoreOf(signals...)
+	return score
 }
 
-// releasesOverlap looks for a release shared between a and b. The second
-// return value reports whether the probe completed — false means at least
-// one provider call failed and the caller should fall back to name-only
-// scoring rather than treating absence of overlap as evidence against a
-// match.
+// releasesOverlap returns (overlap, probed). probed=false means the
+// provider errored and the caller should fall back to name-only.
 func (m *ArtistMatcher) releasesOverlap(ctx context.Context, a, b Artist) (overlap, probed bool) {
 	relA, okA := m.releasesOf(ctx, a)
 	if !okA {
@@ -180,7 +205,7 @@ func (m *ArtistMatcher) releasesOverlap(ctx context.Context, a, b Artist) (overl
 			return false, false
 		}
 		for _, rb := range relB {
-			if m.opts.AlbumMatcher.Match(ctx, ra, rb).Above(m.opts.ReleaseOverlapThreshold) {
+			if m.cfg.albumMatcher.Match(ctx, ra, rb).Same(m.cfg.releaseOverlapThreshold) {
 				return true, true
 			}
 		}
@@ -191,7 +216,7 @@ func (m *ArtistMatcher) releasesOverlap(ctx context.Context, a, b Artist) (overl
 func (m *ArtistMatcher) releasesOf(ctx context.Context, a Artist) ([]Album, bool) {
 	key := artistCacheKey(a)
 
-	// Fast path: cache hit.
+	// Fast path: already cached.
 	m.releaseCacheMu.Lock()
 	if rel, ok := m.releaseCache[key]; ok {
 		m.releaseCacheMu.Unlock()
@@ -203,11 +228,9 @@ func (m *ArtistMatcher) releasesOf(ctx context.Context, a Artist) ([]Album, bool
 	}
 	m.releaseCacheMu.Unlock()
 
-	// Slow path: delegate to singleflight so concurrent callers for the
-	// same key share a single provider call.
+	// Slow path via singleflight so concurrent callers for the same key
+	// share a single provider call.
 	v, err, _ := m.releaseFetch.Do(key, func() (any, error) {
-		// Re-check the cache after acquiring the singleflight slot; an
-		// earlier winner may have populated it while we were waiting.
 		m.releaseCacheMu.Lock()
 		if rel, ok := m.releaseCache[key]; ok {
 			m.releaseCacheMu.Unlock()
@@ -219,7 +242,7 @@ func (m *ArtistMatcher) releasesOf(ctx context.Context, a Artist) ([]Album, bool
 		}
 		m.releaseCacheMu.Unlock()
 
-		rel, err := m.opts.ReleaseProvider.Releases(ctx, a)
+		rel, err := m.cfg.provider.Releases(ctx, a)
 		m.releaseCacheMu.Lock()
 		defer m.releaseCacheMu.Unlock()
 		if err != nil {
@@ -236,16 +259,17 @@ func (m *ArtistMatcher) releasesOf(ctx context.Context, a Artist) ([]Album, bool
 	return rel, true
 }
 
-// artistCacheKey derives a deterministic string key for a given Artist so
-// that releasesOf can deduplicate calls to the provider. Priority: MBID >
-// external IDs > normalised name.
+// artistCacheKey derives a deterministic key for an artist so
+// releasesOf can deduplicate provider calls. Priority: MBID > external
+// IDs > normalised name.
 func artistCacheKey(a Artist) string {
-	if a.MBID != "" {
-		return "mbid:" + a.MBID
+	if mbid, ok := a.Tags.MBID(); ok && mbid != "" {
+		return "mbid:" + mbid
 	}
-	if len(a.ExternalIDs) > 0 {
-		keys := make([]string, 0, len(a.ExternalIDs))
-		for p := range a.ExternalIDs {
+	ids := a.Tags.PlatformIDs()
+	if len(ids) > 0 {
+		keys := make([]string, 0, len(ids))
+		for p := range ids {
 			keys = append(keys, string(p))
 		}
 		sort.Strings(keys)
@@ -254,7 +278,7 @@ func artistCacheKey(a Artist) string {
 		for _, p := range keys {
 			sb.WriteString(p)
 			sb.WriteByte('=')
-			sb.WriteString(a.ExternalIDs[Platform(p)])
+			sb.WriteString(ids[Platform(p)])
 			sb.WriteByte('|')
 		}
 		return sb.String()

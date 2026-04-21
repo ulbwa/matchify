@@ -1,7 +1,5 @@
 package matchify
 
-import "time"
-
 // Platform identifies a music platform. It is a free-form string so callers
 // can register their own platform names; the constants defined here cover
 // the platforms the library is tested against.
@@ -16,6 +14,8 @@ const (
 	PlatformDeezer     Platform = "deezer"
 	PlatformYouTube    Platform = "youtube_music"
 	PlatformAmazon     Platform = "amazon_music"
+	PlatformSoundCloud Platform = "soundcloud"
+	PlatformVK         Platform = "vk_music"
 )
 
 // ReleaseType categorises a release.
@@ -47,8 +47,10 @@ func (r ReleaseType) String() string {
 	}
 }
 
-// Explicitness is a tri-state indicator of whether a track contains
-// explicit content.
+// Explicitness is a tri-state indicator of whether a recording or release
+// contains explicit content. Clean and explicit masters are distinct
+// products — a mismatch between two sides' explicitness is treated as
+// evidence that the sides are different products, not the same.
 type Explicitness uint8
 
 // Explicitness values. ExplicitnessUnknown is the zero value.
@@ -70,106 +72,58 @@ func (e Explicitness) String() string {
 	}
 }
 
-// Artist represents a performer. The Name field is required; every other
-// field is optional. A zero value on an optional field is interpreted as
-// "unknown".
+// Artist represents a performer. Only Name is required; all further
+// attributes (MBID, per-platform IDs, aliases) go through Tags.
+//
+// Because artist-level identifiers are frequently missing on platforms
+// like SoundCloud or VK Music, matching often has to work from the name
+// alone. ArtistMatcher can use an optional ReleaseProvider to disambiguate
+// in that case — see NewArtistMatcher.
 type Artist struct {
-	// Name is the primary display name used by the source platform.
+	// Name is the primary display name from the source platform.
 	Name string
 
-	// Aliases are alternative spellings or transliterations the caller
-	// wants considered equivalent (e.g. "P!nk" alongside "Pink"). They are
-	// compared together with Name during matching.
-	Aliases []string
-
-	// MBID is the MusicBrainz artist identifier, if known. Treated as
-	// authoritative when present on both sides.
-	MBID string
-
-	// ExternalIDs maps a Platform to that platform's artist identifier.
-	// Two artists with the same ID on the same platform are considered a
-	// definite match.
-	ExternalIDs map[Platform]string
+	// Tags carries any optional metadata the platform provided
+	// (MBID, per-platform IDs, aliases, ...). Use NewTags to build.
+	Tags Tags
 }
 
-// Album represents a release (album, single, EP, compilation).
+// Album represents a release (album, single, EP, compilation). Only Name
+// and Artists are required; further attributes (release date, type,
+// track count, UPC, MBID, per-platform IDs, ...) go through Tags.
 type Album struct {
 	// Name is the release title.
 	Name string
 
-	// Artists lists the primary artists credited on the release.
+	// Artists lists the primary artists credited on the release. At
+	// least one artist is expected — matching an album against another
+	// with no artists is allowed but yields a low score.
 	Artists []Artist
 
-	// Type categorises the release. ReleaseTypeUnknown means the caller did
-	// not supply this information.
-	Type ReleaseType
-
-	// ReleaseDate is the original release date. A zero time means unknown.
-	// Callers who only know the year can pass time.Date(year, 1, 1, ...).
-	ReleaseDate time.Time
-
-	// TrackCount is the number of tracks on the release. Zero means
-	// unknown.
-	TrackCount int
-
-	// UPC is the Universal Product Code / EAN for the release. Treated as
-	// authoritative when present on both sides.
-	UPC string
-
-	// MBID is the MusicBrainz release (or release-group) identifier, if
-	// known.
-	MBID string
-
-	// ExternalIDs maps a Platform to that platform's album identifier.
-	ExternalIDs map[Platform]string
+	// Tags carries any optional metadata the platform provided.
+	Tags Tags
 }
 
-// ReleaseYear returns the year of ReleaseDate, or 0 if unknown.
-func (a Album) ReleaseYear() int {
-	if a.ReleaseDate.IsZero() {
-		return 0
-	}
-	return a.ReleaseDate.Year()
-}
-
-// Track represents a single recording on a release.
+// Track represents a single recording on a release. Only Name and
+// Artists are required; an Album pointer is optional context, and all
+// further attributes (duration, ISRC, explicit flag, disc/track number,
+// per-platform IDs, ...) go through Tags.
 type Track struct {
-	// Name is the track title.
+	// Name is the track title. It may contain embedded edition or
+	// feature markers — matchers deal with those internally.
 	Name string
 
 	// Artists lists all credited artists (primary and featured). The
-	// matcher will attempt to reconcile feature credits encoded in the
-	// track title with those listed here.
+	// matcher reconciles feature credits encoded in the title against
+	// the artist list and against composite-credit strings ("A feat. B"
+	// as a single artist entry, as seen on Deezer).
 	Artists []Artist
 
-	// Album is the release the track belongs to, if known. Providing it
-	// strengthens the match when track-level information is ambiguous.
+	// Album is optional context: the release this track belongs to.
+	// When both sides provide an album it is a useful match signal;
+	// when either side leaves it nil, it contributes nothing.
 	Album *Album
 
-	// Duration is the track duration. Zero means unknown.
-	Duration time.Duration
-
-	// DiscNumber is the 1-based disc number. Zero means unknown.
-	DiscNumber int
-
-	// TrackNumber is the 1-based position of the track on its disc. Zero
-	// means unknown.
-	TrackNumber int
-
-	// Explicit indicates whether the recording contains explicit content.
-	// Matchers treat different-but-known values as the same track on the
-	// assumption that clean and explicit masters of the same recording
-	// exist; the Explicit signal contributes to disambiguation, not
-	// rejection.
-	Explicit Explicitness
-
-	// ISRC is the International Standard Recording Code for the
-	// recording. Treated as authoritative when present on both sides.
-	ISRC string
-
-	// MBID is the MusicBrainz recording identifier, if known.
-	MBID string
-
-	// ExternalIDs maps a Platform to that platform's track identifier.
-	ExternalIDs map[Platform]string
+	// Tags carries any optional metadata the platform provided.
+	Tags Tags
 }

@@ -1,35 +1,60 @@
 // Package matchify matches artists, albums, and tracks across different
-// music platforms (Spotify, Apple Music, Tidal, Qobuz, ...).
+// music platforms (Spotify, Apple Music, Tidal, Qobuz, SoundCloud, VK
+// Music, ...).
 //
-// The library operates purely on the data passed to it. It does not fetch
-// anything over the network on its own. If a caller wants artist matching
-// to take release overlap into account, it supplies a ReleaseProvider
-// implementation; the library will call it as needed.
+// The library operates purely on the data the caller passes in — it
+// never fetches anything over the network on its own. Optional metadata
+// (duration, ISRC, UPC, explicit flag, per-platform IDs, ...) flows in
+// via the Tags container, built with NewTags and tag constructors like
+// WithDuration or WithISRC. Absence of a tag is unambiguous — accessors
+// return (zero, false) when a field is not set — so "zero seconds" and
+// "unknown duration" do not collide.
 //
-// The scoring scheme is adaptive: it uses whatever signals are present on
-// the input entities. When authoritative identifiers such as ISRC (for
-// tracks), UPC (for albums), or MusicBrainz IDs are available, they
-// short-circuit the comparison. Otherwise the score is a weighted
-// combination of normalized-name similarity and contextual signals
-// (artist match, duration, release year, track position, ...).
+// The scoring model distinguishes relationship (Relation) from
+// confidence (Score.Value). Two tracks can be the same product
+// (RelationSame), variants of the same work (RelationVariant: different
+// edition, remaster, explicit/clean master, stripped re-recording,
+// remix, ...), or unrelated. Callers use Score.Same(threshold) for the
+// strict "collapse duplicates" question and Score.Related(threshold) to
+// find everything associated with a song or album.
 //
 // # Top-level usage
 //
-//	trackMatcher := matchify.NewTrackMatcher(matchify.TrackMatcherOptions{})
-//	score := trackMatcher.Match(ctx, trackA, trackB)
-//	if score.Above(matchify.DefaultThreshold) {
-//	    // ...
+//	m := matchify.NewTrackMatcher()
+//	score := m.Match(ctx, trackA, trackB)
+//	if score.Same(matchify.DefaultTrackThreshold) {
+//	    // merge
+//	}
+//
+// # Functional options
+//
+// Matchers are configured with type-scoped functional options passed to
+// the constructor:
+//
+//	m := matchify.NewTrackMatcher(
+//	    matchify.TrackNameWeight(4),
+//	    matchify.TrackDurationMismatch(30, 0.5),
+//	)
+//
+// # Tags
+//
+// Optional metadata on Artist/Album/Track is carried via Tags:
+//
+//	t := matchify.Track{
+//	    Name:    "Despacito",
+//	    Artists: []matchify.Artist{{Name: "Luis Fonsi"}},
+//	    Tags: matchify.NewTags(
+//	        matchify.WithDuration(228 * time.Second),
+//	        matchify.WithISRC("USMV10000001"),
+//	        matchify.WithExplicit(matchify.ExplicitnessExplicit),
+//	        matchify.WithPlatformID(matchify.PlatformSpotify, "1i1fxkWeaMmKEB4T7zqbzK"),
+//	    ),
 //	}
 //
 // # Generic helpers
 //
-// FindBest and Group are generic helpers on top of any Matcher[T]. See the
-// documentation for matchify.FindBest and matchify.Group.
+// FindBest and Group are generic helpers on top of any Matcher[T]; they
+// take an Accept predicate (IsSame or IsRelated) so callers pick their
+// own strictness. See the documentation for matchify.FindBest and
+// matchify.Group.
 package matchify
-
-// DefaultThreshold is the score value above which two entities are
-// considered a high-confidence match. Individual matchers expose their own
-// defaults via the Default*Threshold constants — the value here matches
-// the default used by FindBest and Group when no explicit threshold is
-// given.
-const DefaultThreshold = 0.85

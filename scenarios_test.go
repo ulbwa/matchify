@@ -9,16 +9,17 @@ import (
 // supplied scenario comparing editions and variants of two albums from
 // different artists. The rules it asserts:
 //
-//   - "Deluxe Version" and "Deluxe Edition" are equivalent cosmetic labels
-//     for the same edition → MATCH.
-//   - An edition marker on only one side (plain vs Deluxe, plain vs
-//     Extended Cut) → NO MATCH.
-//   - A recording-variant marker on only one side (plain vs Stripped) →
-//     NO MATCH. Variants are distinct re-recordings.
-//   - Different artist + different album → NO MATCH.
+//   - "Deluxe Version" and "Deluxe Edition" are equivalent cosmetic
+//     labels for the same edition → RelationSame.
+//   - An edition marker on only one side (plain vs Deluxe) →
+//     RelationVariant — same album, different packaging.
+//   - A recording-variant marker on only one side (plain vs Stripped,
+//     plain vs Extended Cut) → RelationVariant — different re-recording.
+//   - Different artist + different album → RelationUnrelated (name
+//     similarity is too low even before relation classification).
 func TestScenario_ToveLoBritney(t *testing.T) {
 	t.Parallel()
-	m := NewAlbumMatcher(AlbumMatcherOptions{})
+	m := NewAlbumMatcher()
 	ctx := context.Background()
 
 	toveLo := []Artist{{Name: "Tove Lo"}}
@@ -31,9 +32,9 @@ func TestScenario_ToveLoBritney(t *testing.T) {
 	femmeFataleDEd := Album{Name: "Femme Fatale (Deluxe Edition)", Artists: britney}
 
 	cases := []struct {
-		name  string
-		a, b  Album
-		match bool
+		name     string
+		a, b     Album
+		wantSame bool
 	}{
 		{"dirt femme vs extended cut", dirtFemme, dirtFemmeExtended, false},
 		{"dirt femme vs stripped", dirtFemme, dirtFemmeStripped, false},
@@ -51,10 +52,12 @@ func TestScenario_ToveLoBritney(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			score := m.Match(ctx, tc.a, tc.b)
-			got := score.Above(DefaultAlbumThreshold)
-			if got != tc.match {
-				t.Errorf("Match(%q, %q): got match=%v, want %v (score=%v)",
-					tc.a.Name, tc.b.Name, got, tc.match, score)
+			if got := score.Same(DefaultAlbumThreshold); got != tc.wantSame {
+				t.Errorf("Match(%q, %q): Same=%v, want %v (score=%v)",
+					tc.a.Name, tc.b.Name, got, tc.wantSame, score)
+			}
+			if tc.wantSame && score.Relation != RelationSame {
+				t.Errorf("expected RelationSame, got %v (score=%v)", score.Relation, score)
 			}
 		})
 	}

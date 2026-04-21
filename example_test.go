@@ -9,10 +9,10 @@ import (
 )
 
 // ExampleTrackMatcher_Match demonstrates matching the same track as
-// rendered by two platforms — one listing the featured artist in the title
-// (Apple Music style), the other in the artist array (Spotify style).
+// rendered by two platforms — Spotify keeps featured artists in the
+// artist array, Apple Music tends to append "(feat. X)" to the title.
 func ExampleTrackMatcher_Match() {
-	m := matchify.NewTrackMatcher(matchify.TrackMatcherOptions{})
+	m := matchify.NewTrackMatcher()
 
 	spotify := matchify.Track{
 		Name: "Despacito",
@@ -21,7 +21,7 @@ func ExampleTrackMatcher_Match() {
 			{Name: "Daddy Yankee"},
 			{Name: "Justin Bieber"},
 		},
-		Duration: 228 * time.Second,
+		Tags: matchify.NewTags(matchify.WithDuration(228 * time.Second)),
 	}
 	appleMusic := matchify.Track{
 		Name: "Despacito (feat. Justin Bieber)",
@@ -29,17 +29,17 @@ func ExampleTrackMatcher_Match() {
 			{Name: "Luis Fonsi"},
 			{Name: "Daddy Yankee"},
 		},
-		Duration: 229 * time.Second,
+		Tags: matchify.NewTags(matchify.WithDuration(229 * time.Second)),
 	}
 
 	score := m.Match(context.Background(), spotify, appleMusic)
-	fmt.Printf("match=%v", score.Above(matchify.DefaultTrackThreshold))
-	// Output: match=true
+	fmt.Println("same:", score.Same(matchify.DefaultTrackThreshold))
+	// Output: same: true
 }
 
 // ExampleFindBest demonstrates picking the best candidate from a list.
 func ExampleFindBest() {
-	m := matchify.NewTrackMatcher(matchify.TrackMatcherOptions{})
+	m := matchify.NewTrackMatcher()
 
 	target := matchify.Track{
 		Name:    "Shape of You",
@@ -47,27 +47,32 @@ func ExampleFindBest() {
 	}
 	candidates := []matchify.Track{
 		{Name: "Thinking Out Loud", Artists: []matchify.Artist{{Name: "Ed Sheeran"}}},
-		{Name: "Shape of You (Remastered)", Artists: []matchify.Artist{{Name: "Ed Sheeran"}}},
+		{Name: "Shape of You - Remastered", Artists: []matchify.Artist{{Name: "Ed Sheeran"}}},
 		{Name: "Photograph", Artists: []matchify.Artist{{Name: "Ed Sheeran"}}},
 	}
 
-	idx, _, ok := matchify.FindBest(context.Background(), m, target, candidates, matchify.DefaultTrackThreshold)
+	idx, _, ok := matchify.FindBest(context.Background(), m, target, candidates,
+		matchify.IsSame(matchify.DefaultTrackThreshold))
 	fmt.Printf("ok=%v idx=%d", ok, idx)
 	// Output: ok=true idx=1
 }
 
-// ExampleGroup demonstrates clustering tracks from multiple platforms into
-// groups that represent the same song.
+// ExampleGroup demonstrates clustering tracks into groups that represent
+// the same song across platforms.
 func ExampleGroup() {
-	m := matchify.NewTrackMatcher(matchify.TrackMatcherOptions{})
+	m := matchify.NewTrackMatcher()
 
 	items := []matchify.Track{
-		{Name: "Blinding Lights", Artists: []matchify.Artist{{Name: "The Weeknd"}}, Duration: 200 * time.Second},
-		{Name: "Blinding Lights", Artists: []matchify.Artist{{Name: "The Weeknd"}}, Duration: 200 * time.Second},
-		{Name: "Save Your Tears", Artists: []matchify.Artist{{Name: "The Weeknd"}}, Duration: 216 * time.Second},
+		{Name: "Blinding Lights", Artists: []matchify.Artist{{Name: "The Weeknd"}},
+			Tags: matchify.NewTags(matchify.WithDuration(200 * time.Second))},
+		{Name: "Blinding Lights", Artists: []matchify.Artist{{Name: "The Weeknd"}},
+			Tags: matchify.NewTags(matchify.WithDuration(200 * time.Second))},
+		{Name: "Save Your Tears", Artists: []matchify.Artist{{Name: "The Weeknd"}},
+			Tags: matchify.NewTags(matchify.WithDuration(216 * time.Second))},
 	}
 
-	groups := matchify.Group(context.Background(), m, items, matchify.DefaultTrackThreshold)
+	groups := matchify.Group(context.Background(), m, items,
+		matchify.IsSame(matchify.DefaultTrackThreshold))
 	fmt.Println(groups)
 	// Output: [[0 1] [2]]
 }

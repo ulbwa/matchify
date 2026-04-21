@@ -12,134 +12,158 @@ import (
 // considered a likely match under the default weights.
 const DefaultAlbumThreshold = 0.85
 
-// AlbumMatcherOptions configures an AlbumMatcher.
-type AlbumMatcherOptions struct {
-	// NameWeight controls how strongly the normalised album title drives
-	// the score. Defaults to 3.
-	NameWeight float64
+// albumConfig holds the tunable parameters of an AlbumMatcher.
+type albumConfig struct {
+	nameWeight            float64
+	artistWeight          float64
+	yearWeight            float64
+	trackCountWeight      float64
+	typeWeight            float64
+	upcMismatchCap        float64
+	platformIDMismatchCap float64
+}
 
-	// ArtistWeight controls how strongly the album-artists list drives
-	// the score. Defaults to 2.
-	ArtistWeight float64
+func defaultAlbumConfig() albumConfig {
+	return albumConfig{
+		nameWeight:            3,
+		artistWeight:          2,
+		yearWeight:            1,
+		trackCountWeight:      0.5,
+		typeWeight:            0.3,
+		upcMismatchCap:        0.4,
+		platformIDMismatchCap: 0.4,
+	}
+}
 
-	// YearWeight controls the contribution of release-year agreement.
-	// Defaults to 1.
-	YearWeight float64
+// AlbumOption is a functional option for NewAlbumMatcher.
+type AlbumOption func(*albumConfig)
 
-	// TrackCountWeight controls the contribution of track-count
-	// agreement. Defaults to 0.5.
-	TrackCountWeight float64
+// AlbumNameWeight sets the weight of the normalised name similarity
+// (default 3).
+func AlbumNameWeight(w float64) AlbumOption {
+	return func(c *albumConfig) { c.nameWeight = w }
+}
 
-	// TypeWeight controls the contribution of release-type agreement.
-	// Defaults to 0.3.
-	TypeWeight float64
+// AlbumArtistWeight sets the weight of the artist-list similarity
+// (default 2).
+func AlbumArtistWeight(w float64) AlbumOption {
+	return func(c *albumConfig) { c.artistWeight = w }
+}
 
-	// EditionPenalty is subtracted from Value when the two sides'
-	// edition markers disagree (e.g. plain vs Deluxe). Defaults to 0.1
-	// when the zero value is passed. To disable the penalty, set
-	// DisableEditionPenalty to true; setting EditionPenalty to 0 is
-	// indistinguishable from "not set" and receives the default.
-	EditionPenalty float64
+// AlbumYearWeight sets the weight of release-year agreement (default 1).
+// Only takes effect when both sides set WithReleaseDate.
+func AlbumYearWeight(w float64) AlbumOption {
+	return func(c *albumConfig) { c.yearWeight = w }
+}
 
-	// DisableEditionPenalty suppresses EditionPenalty entirely, so that
-	// plain and edition-marked versions score identically on name and
-	// metadata alone.
-	DisableEditionPenalty bool
+// AlbumTrackCountWeight sets the weight of track-count agreement
+// (default 0.5).
+func AlbumTrackCountWeight(w float64) AlbumOption {
+	return func(c *albumConfig) { c.trackCountWeight = w }
+}
 
-	// UPCMismatchCap caps the score when both sides declare a UPC and
-	// the codes differ. Defaults to 0.4; set to 1 to disable.
-	UPCMismatchCap float64
+// AlbumTypeWeight sets the weight of release-type agreement (album /
+// single / EP / compilation) when both sides set WithReleaseType
+// (default 0.3).
+func AlbumTypeWeight(w float64) AlbumOption {
+	return func(c *albumConfig) { c.typeWeight = w }
+}
 
-	// PlatformIDMismatchCap caps the score when both sides share a
-	// platform key and that platform's IDs disagree. Defaults to 0.4;
-	// set to 1 to disable.
-	PlatformIDMismatchCap float64
+// AlbumUPCMismatchCap caps the score when both sides provide a UPC via
+// WithUPC and the codes differ (default 0.4). Set to 1 to disable.
+func AlbumUPCMismatchCap(cap float64) AlbumOption {
+	return func(c *albumConfig) { c.upcMismatchCap = cap }
+}
 
-	// VariantMismatchCap caps the score when the album names contain
-	// different sets of recording-variant markers (e.g. plain vs
-	// Stripped, Extended Cut vs Stripped). Defaults to 0.5. These are
-	// distinct versions of the release and must not collapse into one.
-	VariantMismatchCap float64
-
-	// ExplicitMismatchCap caps the score when the two albums disagree
-	// on their explicit/clean status (either inferred from the name —
-	// "(Clean Version)", "(Explicit)" — or provided elsewhere). Clean
-	// and explicit masters are distinct products. Defaults to 0.3.
-	ExplicitMismatchCap float64
+// AlbumPlatformIDMismatchCap caps the score when both sides share a
+// platform key via WithPlatformID and that platform's IDs disagree
+// (default 0.4). Set to 1 to disable.
+func AlbumPlatformIDMismatchCap(cap float64) AlbumOption {
+	return func(c *albumConfig) { c.platformIDMismatchCap = cap }
 }
 
 // AlbumMatcher scores the similarity of two Album values.
 type AlbumMatcher struct {
-	opts AlbumMatcherOptions
+	cfg albumConfig
 }
 
-// NewAlbumMatcher returns an AlbumMatcher with the given options.
-func NewAlbumMatcher(opts AlbumMatcherOptions) *AlbumMatcher {
-	applyDefault(&opts.NameWeight, 3)
-	applyDefault(&opts.ArtistWeight, 2)
-	applyDefault(&opts.YearWeight, 1)
-	applyDefault(&opts.TrackCountWeight, 0.5)
-	applyDefault(&opts.TypeWeight, 0.3)
-	applyDefault(&opts.EditionPenalty, 0.1)
-	applyDefault(&opts.UPCMismatchCap, 0.4)
-	applyDefault(&opts.PlatformIDMismatchCap, 0.4)
-	applyDefault(&opts.VariantMismatchCap, 0.5)
-	applyDefault(&opts.ExplicitMismatchCap, 0.3)
-	return &AlbumMatcher{opts: opts}
+// NewAlbumMatcher returns an AlbumMatcher with the given options applied
+// on top of the baseline defaults.
+func NewAlbumMatcher(opts ...AlbumOption) *AlbumMatcher {
+	cfg := defaultAlbumConfig()
+	for _, fn := range opts {
+		if fn != nil {
+			fn(&cfg)
+		}
+	}
+	return &AlbumMatcher{cfg: cfg}
 }
 
 // Match scores the similarity of a and b.
 //
-// Authoritative short-circuits (in priority order):
-//  1. Matching UPC — the same UPC means the same catalog entry.
-//  2. Matching MBID — MusicBrainz release identifiers.
-//  3. Matching platform ID — same ID on the same platform.
+// Authoritative short-circuits (each returns Relation=Same, Value≈1):
+//  1. UPC tags match — same catalog entry.
+//  2. MBID tags match — MusicBrainz release identifiers.
+//  3. Platform-ID tags match on at least one shared platform.
 //
 // Otherwise the score is a weighted combination of normalised name
-// similarity (with edition markers stripped by normalisation), artist-list
-// overlap, release-year agreement, track-count agreement, and release-type
-// agreement. If both albums carry edition markers and the sets differ
-// (e.g. plain vs Deluxe) a small penalty is subtracted.
+// similarity, artist-list overlap, release-year agreement, track-count
+// agreement, and release-type agreement. Recording-variant and explicit
+// disagreements downgrade Relation to Variant; authoritative-ID
+// disagreements downgrade Relation to Unrelated.
 func (m *AlbumMatcher) Match(ctx context.Context, a, b Album) Score {
-	if a.UPC != "" && b.UPC != "" && a.UPC == b.UPC {
-		return authoritativeScore("upc", "UPC match", 1)
+	if upcA, okA := a.Tags.UPC(); okA {
+		if upcB, okB := b.Tags.UPC(); okB && upcA == upcB {
+			return authoritativeScore("upc", "UPC match", 1)
+		}
 	}
-	if a.MBID != "" && b.MBID != "" && a.MBID == b.MBID {
-		return authoritativeScore("mbid", "MBID match", 1)
+	if mbidA, okA := a.Tags.MBID(); okA {
+		if mbidB, okB := b.Tags.MBID(); okB && mbidA == mbidB {
+			return authoritativeScore("mbid", "MBID match", 1)
+		}
 	}
-	if comparePlatformIDs(a.ExternalIDs, b.ExternalIDs) == externalIDEqual {
+	if comparePlatformIDs(a.Tags.PlatformIDs(), b.Tags.PlatformIDs()) == externalIDEqual {
 		return authoritativeScore("platform_id", "platform ID match", 1)
 	}
 
 	signals := []Signal{
-		{Name: "name", Value: nameSimilarity(a.Name, b.Name), Weight: m.opts.NameWeight},
-		artistListSignal(a.Artists, b.Artists, m.opts.ArtistWeight),
-		yearSignal(a.ReleaseYear(), b.ReleaseYear(), m.opts.YearWeight),
-		trackCountSignal(a.TrackCount, b.TrackCount, m.opts.TrackCountWeight),
+		{Name: "name", Value: nameSimilarity(a.Name, b.Name), Weight: m.cfg.nameWeight},
+		artistListSignal(a.Artists, b.Artists, m.cfg.artistWeight),
 	}
 
-	if a.Type != ReleaseTypeUnknown && b.Type != ReleaseTypeUnknown {
+	yA, _ := a.Tags.ReleaseYear()
+	yB, _ := b.Tags.ReleaseYear()
+	signals = append(signals, yearSignal(yA, yB, m.cfg.yearWeight))
+
+	cA, _ := a.Tags.TrackCount()
+	cB, _ := b.Tags.TrackCount()
+	signals = append(signals, trackCountSignal(cA, cB, m.cfg.trackCountWeight))
+
+	tA, okTA := a.Tags.ReleaseType()
+	tB, okTB := b.Tags.ReleaseType()
+	if okTA && okTB {
 		value := 0.0
-		if a.Type == b.Type {
+		if tA == tB {
 			value = 1
 		}
 		signals = append(signals, Signal{
 			Name:   "type",
 			Value:  value,
-			Weight: m.opts.TypeWeight,
+			Weight: m.cfg.typeWeight,
 		})
 	}
 
 	score := scoreOf(signals...)
 
-	if !m.opts.DisableEditionPenalty && !versionparse.SameEdition(a.Name, b.Name) {
+	// Edition disagreement (plain vs Deluxe, plain vs 2011 Remaster)
+	// downgrades to Variant: same underlying album, different packaging.
+	// Only Relation changes; Value remains a measure of variant
+	// confidence.
+	if !versionparse.SameEdition(a.Name, b.Name) {
 		markersA := versionparse.Markers(a.Name)
 		markersB := versionparse.Markers(b.Name)
 		if len(markersA) > 0 || len(markersB) > 0 {
-			score.Value -= m.opts.EditionPenalty
-			if score.Value < 0 {
-				score.Value = 0
-			}
+			score.Relation = RelationVariant
 			score.Signals = append(score.Signals, Signal{
 				Name:   "edition",
 				Value:  0,
@@ -149,42 +173,68 @@ func (m *AlbumMatcher) Match(ctx context.Context, a, b Album) Score {
 		}
 	}
 
+	// Recording-variant disagreement: different re-recordings of the
+	// same work — stripped, extended cut, live, acoustic.
 	if !recordingparse.SameVariant(a.Name, b.Name) {
+		score.Relation = RelationVariant
 		score.Signals = append(score.Signals, Signal{
 			Name: "variant", Value: 0, Weight: 0, Note: "recording variant differs",
 		})
-		if score.Value > m.opts.VariantMismatchCap {
-			score.Value = m.opts.VariantMismatchCap
-		}
 	}
 
-	if explicitparse.Differ(explicitparse.Detect(a.Name), explicitparse.Detect(b.Name)) {
+	// Explicit/clean disagreement.
+	if effectiveAlbumExplicitDiffers(a, b) {
+		score.Relation = RelationVariant
 		score.Signals = append(score.Signals, Signal{
 			Name: "explicit", Value: 0, Weight: 0, Note: "explicit/clean differs",
 		})
-		if score.Value > m.opts.ExplicitMismatchCap {
-			score.Value = m.opts.ExplicitMismatchCap
-		}
 	}
 
-	if a.UPC != "" && b.UPC != "" && a.UPC != b.UPC {
-		score.Signals = append(score.Signals, Signal{
-			Name: "upc", Value: 0, Weight: 0, Note: "UPC mismatch",
-		})
-		if score.Value > m.opts.UPCMismatchCap {
-			score.Value = m.opts.UPCMismatchCap
+	// Authoritative-ID disagreements mean definitely-different products.
+	if upcA, okA := a.Tags.UPC(); okA {
+		if upcB, okB := b.Tags.UPC(); okB && upcA != upcB {
+			score.Relation = RelationUnrelated
+			score.Signals = append(score.Signals, Signal{
+				Name: "upc", Value: 0, Weight: 0, Note: "UPC mismatch",
+			})
+			if score.Value > m.cfg.upcMismatchCap {
+				score.Value = m.cfg.upcMismatchCap
+			}
 		}
 	}
-	if comparePlatformIDs(a.ExternalIDs, b.ExternalIDs) == externalIDDifferent {
+	if comparePlatformIDs(a.Tags.PlatformIDs(), b.Tags.PlatformIDs()) == externalIDDifferent {
+		score.Relation = RelationUnrelated
 		score.Signals = append(score.Signals, Signal{
 			Name: "platform_id", Value: 0, Weight: 0, Note: "platform ID mismatch",
 		})
-		if score.Value > m.opts.PlatformIDMismatchCap {
-			score.Value = m.opts.PlatformIDMismatchCap
+		if score.Value > m.cfg.platformIDMismatchCap {
+			score.Value = m.cfg.platformIDMismatchCap
 		}
 	}
 
 	return score
+}
+
+// effectiveAlbumExplicitDiffers applies the same fallback logic as
+// tracks: a WithExplicit tag takes priority, otherwise parse the name.
+func effectiveAlbumExplicitDiffers(a, b Album) bool {
+	ea := effectiveAlbumExplicit(a)
+	eb := effectiveAlbumExplicit(b)
+	return ea != ExplicitnessUnknown && eb != ExplicitnessUnknown && ea != eb
+}
+
+func effectiveAlbumExplicit(a Album) Explicitness {
+	if e, ok := a.Tags.Explicit(); ok {
+		return e
+	}
+	switch explicitparse.Detect(a.Name) {
+	case explicitparse.Clean:
+		return ExplicitnessClean
+	case explicitparse.Explicit:
+		return ExplicitnessExplicit
+	default:
+		return ExplicitnessUnknown
+	}
 }
 
 func editionNote(a, b []versionparse.Marker) string {

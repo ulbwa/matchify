@@ -53,10 +53,10 @@ func artistSingleNameSimilarity(a, b string) float64 {
 }
 
 // artistNameSimilarity returns the best similarity between two Artist values,
-// considering their names and aliases.
+// considering their names and any aliases recorded via WithAlias.
 func artistNameSimilarity(a, b Artist) float64 {
-	namesA := append([]string{a.Name}, a.Aliases...)
-	namesB := append([]string{b.Name}, b.Aliases...)
+	namesA := append([]string{a.Name}, a.Tags.Aliases()...)
+	namesB := append([]string{b.Name}, b.Tags.Aliases()...)
 	best := 0.0
 	for _, na := range namesA {
 		for _, nb := range namesB {

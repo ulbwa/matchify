@@ -9,23 +9,27 @@ import (
 
 func TestFindBest_Track(t *testing.T) {
 	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
+	m := NewTrackMatcher()
 	ctx := context.Background()
 
 	target := Track{
-		Name:     "Despacito",
-		Artists:  []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}},
-		Duration: 228 * time.Second,
+		Name:    "Despacito",
+		Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}},
+		Tags:    NewTags(WithDuration(228 * time.Second)),
 	}
 	candidates := []Track{
-		{Name: "Shape of You", Artists: []Artist{{Name: "Ed Sheeran"}}, Duration: 233 * time.Second},
-		{Name: "Despacito (feat. Justin Bieber)", Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}}, Duration: 229 * time.Second},
-		{Name: "Havana", Artists: []Artist{{Name: "Camila Cabello"}}, Duration: 217 * time.Second},
+		{Name: "Shape of You", Artists: []Artist{{Name: "Ed Sheeran"}},
+			Tags: NewTags(WithDuration(233 * time.Second))},
+		{Name: "Despacito (feat. Justin Bieber)",
+			Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}},
+			Tags:    NewTags(WithDuration(229 * time.Second))},
+		{Name: "Havana", Artists: []Artist{{Name: "Camila Cabello"}},
+			Tags: NewTags(WithDuration(217 * time.Second))},
 	}
 
-	idx, score, ok := FindBest(ctx, m, target, candidates, DefaultTrackThreshold)
+	idx, score, ok := FindBest(ctx, m, target, candidates, IsSame(DefaultTrackThreshold))
 	if !ok {
-		t.Fatalf("expected to find a match, got none (score %v)", score)
+		t.Fatalf("expected match, got none (score %v)", score)
 	}
 	if idx != 1 {
 		t.Errorf("expected index 1, got %d", idx)
@@ -34,7 +38,7 @@ func TestFindBest_Track(t *testing.T) {
 
 func TestFindBest_NoMatch(t *testing.T) {
 	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
+	m := NewTrackMatcher()
 	ctx := context.Background()
 
 	target := Track{Name: "Target Song", Artists: []Artist{{Name: "Target Artist"}}}
@@ -43,95 +47,84 @@ func TestFindBest_NoMatch(t *testing.T) {
 		{Name: "Random B", Artists: []Artist{{Name: "Someone Else"}}},
 	}
 
-	_, _, ok := FindBest(ctx, m, target, candidates, DefaultTrackThreshold)
+	_, _, ok := FindBest(ctx, m, target, candidates, IsSame(DefaultTrackThreshold))
 	if ok {
 		t.Error("expected no match above threshold")
 	}
 }
 
-func TestFindBest_EmptyCandidates(t *testing.T) {
+func TestFindBest_IsRelatedFindsVariants(t *testing.T) {
 	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
+	m := NewTrackMatcher()
 	ctx := context.Background()
 
-	_, _, ok := FindBest(ctx, m, Track{Name: "x"}, nil, 0.5)
-	if ok {
-		t.Error("expected no match on empty candidates")
-	}
-}
-
-func TestFindBest_ZeroThreshold(t *testing.T) {
-	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
-	ctx := context.Background()
-
-	target := Track{Name: "Target", Artists: []Artist{{Name: "Unique"}}}
+	target := Track{Name: "Shape of You", Artists: []Artist{{Name: "Ed Sheeran"}}}
 	candidates := []Track{
-		{Name: "Something Totally Different", Artists: []Artist{{Name: "Other"}}},
+		{Name: "Bad Habits", Artists: []Artist{{Name: "Ed Sheeran"}}},
+		{Name: "Shape of You (Acoustic)", Artists: []Artist{{Name: "Ed Sheeran"}}},
 	}
-	idx, _, ok := FindBest(ctx, m, target, candidates, 0)
-	if !ok {
-		t.Error("zero threshold should always return best candidate when any exist")
+
+	// IsSame rejects the acoustic variant.
+	if _, _, ok := FindBest(ctx, m, target, candidates, IsSame(DefaultTrackThreshold)); ok {
+		t.Error("IsSame should not admit an acoustic variant of target")
 	}
-	if idx != 0 {
-		t.Errorf("expected index 0 (only candidate), got %d", idx)
+	// IsRelated admits it.
+	idx, _, ok := FindBest(ctx, m, target, candidates, IsRelated(DefaultTrackThreshold))
+	if !ok || idx != 1 {
+		t.Errorf("IsRelated should pick acoustic variant at index 1, got idx=%d ok=%v", idx, ok)
 	}
 }
 
 func TestGroup_Tracks(t *testing.T) {
 	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
+	m := NewTrackMatcher()
 	ctx := context.Background()
 
 	items := []Track{
-		// Group A: Despacito
-		{Name: "Despacito", Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}, {Name: "Justin Bieber"}}, Duration: 228 * time.Second},
-		{Name: "Despacito (feat. Justin Bieber)", Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}}, Duration: 229 * time.Second},
+		{Name: "Despacito",
+			Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}, {Name: "Justin Bieber"}},
+			Tags:    NewTags(WithDuration(228 * time.Second))},
+		{Name: "Despacito (feat. Justin Bieber)",
+			Artists: []Artist{{Name: "Luis Fonsi"}, {Name: "Daddy Yankee"}},
+			Tags:    NewTags(WithDuration(229 * time.Second))},
 
-		// Group B: Shape of You
-		{Name: "Shape of You", Artists: []Artist{{Name: "Ed Sheeran"}}, Duration: 233 * time.Second},
-		{Name: "Shape of You (Acoustic)", Artists: []Artist{{Name: "Ed Sheeran"}}, Duration: 233 * time.Second},
+		{Name: "Shape of You", Artists: []Artist{{Name: "Ed Sheeran"}},
+			Tags: NewTags(WithDuration(233 * time.Second))},
+		{Name: "Shape of You (Acoustic)", Artists: []Artist{{Name: "Ed Sheeran"}},
+			Tags: NewTags(WithDuration(233 * time.Second))},
 
-		// Singleton: different song
-		{Name: "Havana", Artists: []Artist{{Name: "Camila Cabello"}}, Duration: 217 * time.Second},
+		{Name: "Havana", Artists: []Artist{{Name: "Camila Cabello"}},
+			Tags: NewTags(WithDuration(217 * time.Second))},
 	}
 
-	groups := Group(ctx, m, items, DefaultTrackThreshold)
-
-	// Expect: {0, 1}, {2}, {3}, {4} — Despacito pair groups, acoustic doesn't group with non-acoustic.
+	groups := Group(ctx, m, items, IsSame(DefaultTrackThreshold))
 	want := [][]int{{0, 1}, {2}, {3}, {4}}
 	if !reflect.DeepEqual(groups, want) {
-		t.Errorf("Group: got %v, want %v", groups, want)
+		t.Errorf("Group(IsSame): got %v, want %v", groups, want)
+	}
+
+	// IsRelated should group the acoustic variant with the studio.
+	groupsR := Group(ctx, m, items, IsRelated(DefaultTrackThreshold))
+	wantR := [][]int{{0, 1}, {2, 3}, {4}}
+	if !reflect.DeepEqual(groupsR, wantR) {
+		t.Errorf("Group(IsRelated): got %v, want %v", groupsR, wantR)
 	}
 }
 
 func TestGroup_Empty(t *testing.T) {
 	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
-	ctx := context.Background()
-	if got := Group(ctx, m, nil, DefaultTrackThreshold); got != nil {
+	m := NewTrackMatcher()
+	if got := Group(context.Background(), m, nil, IsSame(DefaultTrackThreshold)); got != nil {
 		t.Errorf("expected nil, got %v", got)
-	}
-}
-
-func TestGroup_Singleton(t *testing.T) {
-	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
-	ctx := context.Background()
-	got := Group(ctx, m, []Track{{Name: "solo"}}, DefaultTrackThreshold)
-	want := [][]int{{0}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("singleton: got %v, want %v", got, want)
 	}
 }
 
 func TestFindBest_ContextCancelled(t *testing.T) {
 	t.Parallel()
-	m := NewTrackMatcher(TrackMatcherOptions{})
+	m := NewTrackMatcher()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-
-	_, _, ok := FindBest(ctx, m, Track{Name: "x"}, []Track{{Name: "y"}}, 0)
+	_, _, ok := FindBest(ctx, m, Track{Name: "x"}, []Track{{Name: "y"}}, IsSame(0))
 	if ok {
 		t.Error("cancelled context should break out without success")
 	}

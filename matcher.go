@@ -13,13 +13,33 @@ type Matcher[T any] interface {
 	Match(ctx context.Context, a, b T) Score
 }
 
-// FindBest iterates over candidates and returns the index of the candidate
-// with the highest score against target, along with the score itself. The
-// result is reported only if the score meets threshold; otherwise the
-// returned ok is false.
+// Accept is a predicate on a Score. FindBest and Group take one of these
+// to decide which scores count as "a match". Common choices are
+// IsSame(threshold) (strict: only RelationSame) and IsRelated(threshold)
+// (lenient: RelationSame or RelationVariant). Callers are free to define
+// their own.
+type Accept func(Score) bool
+
+// IsSame returns an Accept predicate that admits only same-product
+// matches at or above threshold.
+func IsSame(threshold float64) Accept {
+	return func(s Score) bool { return s.Same(threshold) }
+}
+
+// IsRelated returns an Accept predicate that admits both same-product
+// and variant matches at or above threshold.
+func IsRelated(threshold float64) Accept {
+	return func(s Score) bool { return s.Related(threshold) }
+}
+
+// FindBest iterates over candidates and returns the index of the
+// candidate with the highest Score.Value, along with the score itself.
+// The result is reported only if the score satisfies accept; otherwise
+// the returned ok is false.
 //
-// Pass a threshold of 0 to always receive the best-scoring candidate.
-func FindBest[T any](ctx context.Context, m Matcher[T], target T, candidates []T, threshold float64) (int, Score, bool) {
+// To find only same-product matches use IsSame(threshold); to find
+// variants too use IsRelated(threshold).
+func FindBest[T any](ctx context.Context, m Matcher[T], target T, candidates []T, accept Accept) (int, Score, bool) {
 	bestIdx := -1
 	var bestScore Score
 	for i, c := range candidates {
@@ -32,22 +52,21 @@ func FindBest[T any](ctx context.Context, m Matcher[T], target T, candidates []T
 			bestScore = s
 		}
 	}
-	if bestIdx == -1 || !bestScore.Above(threshold) {
+	if bestIdx == -1 || !accept(bestScore) {
 		return -1, Score{}, false
 	}
 	return bestIdx, bestScore, true
 }
 
-// Group clusters items into groups of indices such that every adjacent pair
-// (in the transitive sense) scores at or above threshold. The returned
-// groups partition the indices [0, len(items)) and are ordered by the first
-// index they contain; singletons are included.
+// Group clusters items into groups of indices such that every adjacent
+// pair (in the transitive sense) satisfies accept. The returned groups
+// partition [0, len(items)) and are ordered by the smallest index they
+// contain; singletons are included.
 //
-// Group runs in O(n²) comparisons — each pair is compared once via m.Match.
-// For large inputs, callers may want to pre-bucket items by some
-// deterministic key (e.g. normalized artist name) before calling Group on
-// each bucket.
-func Group[T any](ctx context.Context, m Matcher[T], items []T, threshold float64) [][]int {
+// Group runs in O(n²) comparisons. For large inputs, pre-bucket items by
+// a deterministic key (e.g. normalised artist name) before calling
+// Group on each bucket.
+func Group[T any](ctx context.Context, m Matcher[T], items []T, accept Accept) [][]int {
 	n := len(items)
 	if n == 0 {
 		return nil
@@ -76,7 +95,7 @@ func Group[T any](ctx context.Context, m Matcher[T], items []T, threshold float6
 			break
 		}
 		for j := i + 1; j < n; j++ {
-			if m.Match(ctx, items[i], items[j]).Above(threshold) {
+			if accept(m.Match(ctx, items[i], items[j])) {
 				union(i, j)
 			}
 		}
@@ -88,7 +107,6 @@ func Group[T any](ctx context.Context, m Matcher[T], items []T, threshold float6
 		groups[root] = append(groups[root], i)
 	}
 
-	// Order groups deterministically by their smallest index.
 	heads := make([]int, 0, len(groups))
 	for root := range groups {
 		heads = append(heads, root)
